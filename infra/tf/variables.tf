@@ -9,13 +9,13 @@ variable "aws_endpoint_url" {
 }
 
 variable "aws_access_key_id" {
-  type    = string
-  default = "test"
+  type      = string
+  sensitive = true
 }
 
 variable "aws_secret_access_key" {
-  type    = string
-  default = "test"
+  type      = string
+  sensitive = true
 }
 
 variable "project_name" {
@@ -26,9 +26,4 @@ variable "project_name" {
 variable "queue_name" {
   type    = string
   default = "ingest-events"
-}
-
-variable "lambda_name" {
-  type    = string
-  default = "ingest-events-consumer"
 }

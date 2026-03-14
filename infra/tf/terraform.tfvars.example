@@ -1,3 +1,4 @@
 aws_region            = "us-east-1"
 aws_endpoint_url      = "http://localhost:4566"
 queue_name            = "ingest-events"
+table_name            = "ingest-events"

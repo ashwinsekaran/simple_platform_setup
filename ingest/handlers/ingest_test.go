@@ -14,7 +14,7 @@ import (
 )
 
 func TestPostEventCreatesEvent(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+	server := NewIngestServer(stubEventRepository{created: true})
 
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}`))
 	recorder := httptest.NewRecorder()
@@ -26,8 +26,8 @@ func TestPostEventCreatesEvent(t *testing.T) {
 	}
 }
 
-func TestPostEventAllowsRepeatedPosts(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+func TestPostEventReturnsOKForIdempotentReplay(t *testing.T) {
+	server := NewIngestServer(stubEventRepository{created: false})
 	handler := server.Handler()
 	body := `{"id":"evt-1","type":"user.created","payload":{"name":"Ada","role":"admin"}}`
 
@@ -39,12 +39,12 @@ func TestPostEventAllowsRepeatedPosts(t *testing.T) {
 	secondRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(secondRecorder, secondRequest)
 
-	if firstRecorder.Code != http.StatusAccepted {
-		t.Fatalf("expected first status %d, got %d", http.StatusAccepted, firstRecorder.Code)
+	if firstRecorder.Code != http.StatusOK {
+		t.Fatalf("expected first status %d, got %d", http.StatusOK, firstRecorder.Code)
 	}
 
-	if secondRecorder.Code != http.StatusAccepted {
-		t.Fatalf("expected second status %d, got %d", http.StatusAccepted, secondRecorder.Code)
+	if secondRecorder.Code != http.StatusOK {
+		t.Fatalf("expected second status %d, got %d", http.StatusOK, secondRecorder.Code)
 	}
 }
 
@@ -71,6 +71,19 @@ func TestPostEventReturnsInternalServerErrorWhenPublishFails(t *testing.T) {
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	}
+}
+
+func TestPostEventReturnsConflictWhenExistingEventDiffers(t *testing.T) {
+	server := NewIngestServer(stubEventRepository{err: repo.ErrEventConflict})
+
+	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}`))
+	recorder := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, recorder.Code)
 	}
 }
 
@@ -151,15 +164,16 @@ type stubEventRepository struct {
 	err      error
 	readyErr error
 	events   map[string]ent.Event
+	created  bool
 }
 
-func (s stubEventRepository) PublishEvent(_ context.Context, event ent.Event) error {
+func (s stubEventRepository) SaveEvent(_ context.Context, event ent.Event) (bool, error) {
 	if s.events == nil {
-		return s.err
+		return s.created, s.err
 	}
 
 	s.events[event.ID] = event
-	return s.err
+	return s.created, s.err
 }
 
 func (s stubEventRepository) GetEvent(_ context.Context, id string) (ent.Event, error) {

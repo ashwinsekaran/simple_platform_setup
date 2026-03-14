@@ -8,9 +8,10 @@ import (
 )
 
 var ErrEventNotFound = errors.New("event not found")
+var ErrEventConflict = errors.New("event already exists with different content")
 
 type EventRepository interface {
-	PublishEvent(ctx context.Context, event ent.Event) error
+	SaveEvent(ctx context.Context, event ent.Event) (created bool, err error)
 	GetEvent(ctx context.Context, id string) (ent.Event, error)
 	Ready(ctx context.Context) error
 }

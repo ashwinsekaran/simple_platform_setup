@@ -23,12 +23,14 @@ demo:
 	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
 	terraform -chdir=$(TF_DIR) apply -auto-approve
 	@QUEUE_URL="$$(terraform -chdir=$(TF_DIR) output -raw ingest_queue_url)"; \
+	TABLE_NAME="$$(terraform -chdir=$(TF_DIR) output -raw ingest_table_name)"; \
 	trap 'kill 0' INT TERM EXIT; \
 	AWS_REGION="$(AWS_REGION)" \
 	AWS_ENDPOINT_URL="$(AWS_ENDPOINT_URL)" \
 	AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" \
 	AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
 	INGEST_HTTP_ADDR="$(INGEST_HTTP_ADDR)" \
+	INGEST_DYNAMODB_TABLE="$$TABLE_NAME" \
 	INGEST_SQS_QUEUE_URL="$$QUEUE_URL" \
 	go run ./ingest & \
 	AWS_REGION="$(AWS_REGION)" \

@@ -68,7 +68,15 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 		Payload: request.Payload,
 	}
 
-	if err := s.repo.PublishEvent(r.Context(), event); err != nil {
+	created, err := s.repo.SaveEvent(r.Context(), event)
+	if err != nil {
+		if err == repo.ErrEventConflict {
+			common.WriteJSON(w, http.StatusConflict, map[string]string{
+				"error": "event id already exists with different content",
+			})
+			return
+		}
+
 		log.Printf("publish event failed: %v", err)
 		common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to publish event",
@@ -76,8 +84,14 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
-	common.WriteJSON(w, http.StatusAccepted, event)
+	if created {
+		log.Printf("stored and published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
+		common.WriteJSON(w, http.StatusAccepted, event)
+		return
+	}
+
+	log.Printf("idempotent replay ignored for event: id=%s", event.ID)
+	common.WriteJSON(w, http.StatusOK, event)
 }
 
 func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {

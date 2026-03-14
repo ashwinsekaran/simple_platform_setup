@@ -19,6 +19,7 @@ provider "aws" {
   s3_use_path_style           = true
 
   endpoints {
-    sqs = var.aws_endpoint_url
+    dynamodb = var.aws_endpoint_url
+    sqs      = var.aws_endpoint_url
   }
 }

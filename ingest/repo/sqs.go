@@ -3,23 +3,33 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamoTypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 type SQSRepository struct {
-	client   *sqs.Client
-	queueURL string
-	mu       sync.RWMutex
-	events   map[string]ent.Event
+	sqsClient *sqs.Client
+	ddbClient *dynamodb.Client
+	queueURL  string
+	tableName string
+}
+
+type storedEvent struct {
+	ID        string `dynamodbav:"id"`
+	Type      string `dynamodbav:"type"`
+	Payload   string `dynamodbav:"payload"`
+	Published bool   `dynamodbav:"published"`
 }
 
 func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, error) {
@@ -44,19 +54,150 @@ func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, e
 	}
 
 	return &SQSRepository{
-		client:   sqs.NewFromConfig(awsCfg),
-		queueURL: cfg.SQSQueueURL,
-		events:   make(map[string]ent.Event),
+		sqsClient: sqs.NewFromConfig(awsCfg),
+		ddbClient: dynamodb.NewFromConfig(awsCfg),
+		queueURL:  cfg.SQSQueueURL,
+		tableName: cfg.DynamoTableName,
 	}, nil
 }
 
-func (r *SQSRepository) PublishEvent(ctx context.Context, event ent.Event) error {
+func (r *SQSRepository) SaveEvent(ctx context.Context, event ent.Event) (bool, error) {
+	item := storedEvent{
+		ID:        event.ID,
+		Type:      event.Type,
+		Payload:   string(event.Payload),
+		Published: false,
+	}
+
+	av, err := attributevalue.MarshalMap(item)
+	if err != nil {
+		return false, fmt.Errorf("marshal event item: %w", err)
+	}
+
+	_, err = r.ddbClient.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName:           aws.String(r.tableName),
+		Item:                av,
+		ConditionExpression: aws.String("attribute_not_exists(id)"),
+	})
+	if err != nil {
+		var conditionalCheck *dynamoTypes.ConditionalCheckFailedException
+		if !errors.As(err, &conditionalCheck) {
+			return false, fmt.Errorf("store event: %w", err)
+		}
+
+		existing, getErr := r.getStoredEvent(ctx, event.ID)
+		if getErr != nil {
+			return false, getErr
+		}
+
+		if existing.Type != event.Type || existing.Payload != string(event.Payload) {
+			return false, ErrEventConflict
+		}
+
+		if existing.Published {
+			return false, nil
+		}
+	} else {
+		if err := r.publishEvent(ctx, event); err != nil {
+			return false, err
+		}
+
+		if err := r.markPublished(ctx, event.ID); err != nil {
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	if err := r.publishEvent(ctx, event); err != nil {
+		return false, err
+	}
+
+	if err := r.markPublished(ctx, event.ID); err != nil {
+		return false, err
+	}
+
+	return false, nil
+}
+
+func (r *SQSRepository) GetEvent(ctx context.Context, id string) (ent.Event, error) {
+	item, err := r.getStoredEvent(ctx, id)
+	if err != nil {
+		return ent.Event{}, err
+	}
+
+	return ent.Event{
+		ID:      item.ID,
+		Type:    item.Type,
+		Payload: json.RawMessage(item.Payload),
+	}, nil
+}
+
+func (r *SQSRepository) Ready(ctx context.Context) error {
+	if _, err := r.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+		QueueUrl: aws.String(r.queueURL),
+	}); err != nil {
+		return fmt.Errorf("check queue readiness: %w", err)
+	}
+
+	if _, err := r.ddbClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: aws.String(r.tableName),
+	}); err != nil {
+		return fmt.Errorf("check dynamodb readiness: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQSRepository) getStoredEvent(ctx context.Context, id string) (storedEvent, error) {
+	output, err := r.ddbClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]dynamoTypes.AttributeValue{
+			"id": &dynamoTypes.AttributeValueMemberS{Value: id},
+		},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return storedEvent{}, fmt.Errorf("get event: %w", err)
+	}
+
+	if len(output.Item) == 0 {
+		return storedEvent{}, ErrEventNotFound
+	}
+
+	var item storedEvent
+	if err := attributevalue.UnmarshalMap(output.Item, &item); err != nil {
+		return storedEvent{}, fmt.Errorf("unmarshal event item: %w", err)
+	}
+
+	return item, nil
+}
+
+func (r *SQSRepository) markPublished(ctx context.Context, id string) error {
+	_, err := r.ddbClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]dynamoTypes.AttributeValue{
+			"id": &dynamoTypes.AttributeValueMemberS{Value: id},
+		},
+		UpdateExpression: aws.String("SET published = :published"),
+		ExpressionAttributeValues: map[string]dynamoTypes.AttributeValue{
+			":published": &dynamoTypes.AttributeValueMemberBOOL{Value: true},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("mark event published: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQSRepository) publishEvent(ctx context.Context, event ent.Event) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	_, err = r.client.SendMessage(ctx, &sqs.SendMessageInput{
+	_, err = r.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:          aws.String(r.queueURL),
 		MessageBody:       aws.String(string(body)),
 		MessageAttributes: messageAttributes(event),
@@ -64,10 +205,6 @@ func (r *SQSRepository) PublishEvent(ctx context.Context, event ent.Event) error
 	if err != nil {
 		return fmt.Errorf("send sqs message: %w", err)
 	}
-
-	r.mu.Lock()
-	r.events[event.ID] = event
-	r.mu.Unlock()
 
 	return nil
 }
@@ -83,27 +220,4 @@ func messageAttributes(event ent.Event) map[string]sqsTypes.MessageAttributeValu
 			StringValue: aws.String(event.ID),
 		},
 	}
-}
-
-func (r *SQSRepository) GetEvent(_ context.Context, id string) (ent.Event, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	event, ok := r.events[id]
-	if !ok {
-		return ent.Event{}, ErrEventNotFound
-	}
-
-	return event, nil
-}
-
-func (r *SQSRepository) Ready(ctx context.Context) error {
-	_, err := r.client.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
-		QueueUrl: aws.String(r.queueURL),
-	})
-	if err != nil {
-		return fmt.Errorf("check queue readiness: %w", err)
-	}
-
-	return nil
 }

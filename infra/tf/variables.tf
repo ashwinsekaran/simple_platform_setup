@@ -27,3 +27,8 @@ variable "queue_name" {
   type    = string
   default = "ingest-events"
 }
+
+variable "table_name" {
+  type    = string
+  default = "ingest-events"
+}

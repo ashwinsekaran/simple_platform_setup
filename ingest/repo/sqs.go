@@ -57,18 +57,9 @@ func (r *SQSRepository) PublishEvent(ctx context.Context, event ent.Event) error
 	}
 
 	_, err = r.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    aws.String(r.queueURL),
-		MessageBody: aws.String(string(body)),
-		MessageAttributes: map[string]sqsTypes.MessageAttributeValue{
-			"event_type": {
-				DataType:    aws.String("String"),
-				StringValue: aws.String(event.Type),
-			},
-			"event_id": {
-				DataType:    aws.String("String"),
-				StringValue: aws.String(event.ID),
-			},
-		},
+		QueueUrl:          aws.String(r.queueURL),
+		MessageBody:       aws.String(string(body)),
+		MessageAttributes: messageAttributes(event),
 	})
 	if err != nil {
 		return fmt.Errorf("send sqs message: %w", err)
@@ -79,6 +70,19 @@ func (r *SQSRepository) PublishEvent(ctx context.Context, event ent.Event) error
 	r.mu.Unlock()
 
 	return nil
+}
+
+func messageAttributes(event ent.Event) map[string]sqsTypes.MessageAttributeValue {
+	return map[string]sqsTypes.MessageAttributeValue{
+		"event_type": {
+			DataType:    aws.String("String"),
+			StringValue: aws.String(event.Type),
+		},
+		"event_id": {
+			DataType:    aws.String("String"),
+			StringValue: aws.String(event.ID),
+		},
+	}
 }
 
 func (r *SQSRepository) GetEvent(_ context.Context, id string) (ent.Event, error) {

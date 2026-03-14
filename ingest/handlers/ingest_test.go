@@ -153,7 +153,12 @@ type stubEventRepository struct {
 	events   map[string]ent.Event
 }
 
-func (s stubEventRepository) PublishEvent(_ context.Context, _ ent.Event) error {
+func (s stubEventRepository) PublishEvent(_ context.Context, event ent.Event) error {
+	if s.events == nil {
+		return s.err
+	}
+
+	s.events[event.ID] = event
 	return s.err
 }
 

@@ -5,14 +5,29 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
-	"github.com/ashwinsekaran/simple_platform_app/common"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/repo"
+	"github.com/ashwinsekaran/simple_platform_app/monitoring/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type IngestServer struct {
 	repo repo.EventRepository
+}
+
+var ingestMetrics struct {
+	once       sync.Once
+	requests   metric.Int64Counter
+	successes  metric.Int64Counter
+	errors     metric.Int64Counter
+	durationMS metric.Float64Histogram
 }
 
 func NewIngestServer(eventRepo repo.EventRepository) *IngestServer {
@@ -35,6 +50,15 @@ func (s *IngestServer) routes() http.Handler {
 }
 
 func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx, span := otel.Tracer("simple_platform_setup/ingest").Start(ctx, "ingest.post_event")
+	defer span.End()
+
+	instruments := ingestInstruments()
+	instruments.requests.Add(ctx, 1)
+	start := time.Now()
+	defer instruments.durationMS.Record(ctx, float64(time.Since(start).Milliseconds()))
+
 	var request struct {
 		ID      string          `json:"id"`
 		Type    string          `json:"type"`
@@ -42,21 +66,28 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+		instruments.errors.Add(ctx, 1)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "invalid JSON body")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "invalid JSON body",
 		})
 		return
 	}
 
 	if request.ID == "" || request.Type == "" || len(request.Payload) == 0 {
-		common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+		instruments.errors.Add(ctx, 1)
+		span.SetStatus(codes.Error, "missing required fields")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "id, type, and payload are required",
 		})
 		return
 	}
 
 	if !json.Valid(request.Payload) {
-		common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+		instruments.errors.Add(ctx, 1)
+		span.SetStatus(codes.Error, "payload must be valid JSON")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "payload must be valid JSON",
 		})
 		return
@@ -67,37 +98,48 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 		Type:    request.Type,
 		Payload: request.Payload,
 	}
+	span.SetAttributes(
+		attribute.String("event.id", event.ID),
+		attribute.String("event.type", event.Type),
+	)
 
-	created, err := s.repo.SaveEvent(r.Context(), event)
+	created, err := s.repo.SaveEvent(ctx, event)
 	if err != nil {
 		if err == repo.ErrEventConflict {
-			common.WriteJSON(w, http.StatusConflict, map[string]string{
+			instruments.errors.Add(ctx, 1)
+			span.SetStatus(codes.Error, "event conflict")
+			WriteJSON(w, http.StatusConflict, map[string]string{
 				"error": "event id already exists with different content",
 			})
 			return
 		}
 
-		log.Printf("publish event failed: %v", err)
-		common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
+		instruments.errors.Add(ctx, 1)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to publish event")
+		telemetry.Log(ctx, "publish event failed: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to publish event",
 		})
 		return
 	}
 
 	if created {
-		log.Printf("stored and published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
-		common.WriteJSON(w, http.StatusAccepted, event)
+		instruments.successes.Add(ctx, 1)
+		telemetry.Log(ctx, "stored and published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
+		WriteJSON(w, http.StatusAccepted, event)
 		return
 	}
 
-	log.Printf("idempotent replay ignored for event: id=%s", event.ID)
-	common.WriteJSON(w, http.StatusOK, event)
+	instruments.successes.Add(ctx, 1)
+	telemetry.Log(ctx, "idempotent replay ignored for event: id=%s", event.ID)
+	WriteJSON(w, http.StatusOK, event)
 }
 
 func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "event id is required",
 		})
 		return
@@ -106,24 +148,24 @@ func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {
 	event, err := s.repo.GetEvent(r.Context(), id)
 	if err != nil {
 		if err == repo.ErrEventNotFound {
-			common.WriteJSON(w, http.StatusNotFound, map[string]string{
+			WriteJSON(w, http.StatusNotFound, map[string]string{
 				"error": "event not found",
 			})
 			return
 		}
 
 		log.Printf("get event failed: %v", err)
-		common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to get event",
 		})
 		return
 	}
 
-	common.WriteJSON(w, http.StatusOK, event)
+	WriteJSON(w, http.StatusOK, event)
 }
 
 func (s *IngestServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
-	common.WriteJSON(w, http.StatusOK, map[string]string{
+	WriteJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 	})
 }
@@ -131,13 +173,40 @@ func (s *IngestServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 func (s *IngestServer) HandleReady(w http.ResponseWriter, r *http.Request) {
 	if err := s.repo.Ready(r.Context()); err != nil {
 		log.Printf("readiness check failed: %v", err)
-		common.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
+		WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"status": "not_ready",
 		})
 		return
 	}
 
-	common.WriteJSON(w, http.StatusOK, map[string]string{
+	WriteJSON(w, http.StatusOK, map[string]string{
 		"status": "ready",
 	})
+}
+
+func ingestInstruments() *struct {
+	once       sync.Once
+	requests   metric.Int64Counter
+	successes  metric.Int64Counter
+	errors     metric.Int64Counter
+	durationMS metric.Float64Histogram
+} {
+	ingestMetrics.once.Do(func() {
+		meter := otel.Meter("simple_platform_setup/ingest")
+		ingestMetrics.requests, _ = meter.Int64Counter("ingest_requests_total")
+		ingestMetrics.successes, _ = meter.Int64Counter("ingest_success_total")
+		ingestMetrics.errors, _ = meter.Int64Counter("ingest_error_total")
+		ingestMetrics.durationMS, _ = meter.Float64Histogram("ingest_request_duration_ms")
+	})
+
+	return &ingestMetrics
+}
+
+func WriteJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		log.Printf("write response: %v", err)
+	}
 }

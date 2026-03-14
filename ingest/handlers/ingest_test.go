@@ -14,9 +14,10 @@ import (
 )
 
 func TestPostEventCreatesEvent(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{created: true})
+	server := NewIngestServer(&stubEventRepository{created: true})
 
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}`))
+	request.Header.Set("traceparent", "00-abc-xyz-01")
 	recorder := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(recorder, request)
@@ -27,7 +28,7 @@ func TestPostEventCreatesEvent(t *testing.T) {
 }
 
 func TestPostEventReturnsOKForIdempotentReplay(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{created: false})
+	server := NewIngestServer(&stubEventRepository{created: false})
 	handler := server.Handler()
 	body := `{"id":"evt-1","type":"user.created","payload":{"name":"Ada","role":"admin"}}`
 
@@ -49,7 +50,7 @@ func TestPostEventReturnsOKForIdempotentReplay(t *testing.T) {
 }
 
 func TestPostEventValidatesRequiredFields(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+	server := NewIngestServer(&stubEventRepository{})
 
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"","type":"user.created","payload":{"name":"Ada"}}`))
 	recorder := httptest.NewRecorder()
@@ -62,7 +63,7 @@ func TestPostEventValidatesRequiredFields(t *testing.T) {
 }
 
 func TestPostEventReturnsInternalServerErrorWhenPublishFails(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{err: errors.New("publish failed")})
+	server := NewIngestServer(&stubEventRepository{err: errors.New("publish failed")})
 
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}`))
 	recorder := httptest.NewRecorder()
@@ -75,7 +76,7 @@ func TestPostEventReturnsInternalServerErrorWhenPublishFails(t *testing.T) {
 }
 
 func TestPostEventReturnsConflictWhenExistingEventDiffers(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{err: repo.ErrEventConflict})
+	server := NewIngestServer(&stubEventRepository{err: repo.ErrEventConflict})
 
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}`))
 	recorder := httptest.NewRecorder()
@@ -88,7 +89,7 @@ func TestPostEventReturnsConflictWhenExistingEventDiffers(t *testing.T) {
 }
 
 func TestGetEventReturnsEventByID(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{
+	server := NewIngestServer(&stubEventRepository{
 		records: map[string]ent.EventRecord{
 			"evt-1": {
 				ID:               "evt-1",
@@ -111,7 +112,7 @@ func TestGetEventReturnsEventByID(t *testing.T) {
 }
 
 func TestGetEventReturnsNotFound(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+	server := NewIngestServer(&stubEventRepository{})
 
 	request := httptest.NewRequest(http.MethodGet, "/events/missing", nil)
 	recorder := httptest.NewRecorder()
@@ -124,7 +125,7 @@ func TestGetEventReturnsNotFound(t *testing.T) {
 }
 
 func TestHealthReturnsOK(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+	server := NewIngestServer(&stubEventRepository{})
 
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
 	recorder := httptest.NewRecorder()
@@ -137,7 +138,7 @@ func TestHealthReturnsOK(t *testing.T) {
 }
 
 func TestReadyReturnsOK(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{})
+	server := NewIngestServer(&stubEventRepository{})
 
 	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	recorder := httptest.NewRecorder()
@@ -150,7 +151,7 @@ func TestReadyReturnsOK(t *testing.T) {
 }
 
 func TestReadyReturnsServiceUnavailableWhenRepoIsNotReady(t *testing.T) {
-	server := NewIngestServer(stubEventRepository{readyErr: errors.New("not ready")})
+	server := NewIngestServer(&stubEventRepository{readyErr: errors.New("not ready")})
 
 	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	recorder := httptest.NewRecorder()
@@ -169,7 +170,7 @@ type stubEventRepository struct {
 	created  bool
 }
 
-func (s stubEventRepository) SaveEvent(_ context.Context, event ent.Event) (bool, error) {
+func (s *stubEventRepository) SaveEvent(_ context.Context, event ent.Event) (bool, error) {
 	if s.records == nil {
 		return s.created, s.err
 	}
@@ -183,7 +184,7 @@ func (s stubEventRepository) SaveEvent(_ context.Context, event ent.Event) (bool
 	return s.created, s.err
 }
 
-func (s stubEventRepository) GetEvent(_ context.Context, id string) (ent.EventRecord, error) {
+func (s *stubEventRepository) GetEvent(_ context.Context, id string) (ent.EventRecord, error) {
 	event, ok := s.records[id]
 	if !ok {
 		return ent.EventRecord{}, repo.ErrEventNotFound
@@ -192,6 +193,6 @@ func (s stubEventRepository) GetEvent(_ context.Context, id string) (ent.EventRe
 	return event, nil
 }
 
-func (s stubEventRepository) Ready(_ context.Context) error {
+func (s *stubEventRepository) Ready(_ context.Context) error {
 	return s.readyErr
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
@@ -16,6 +18,7 @@ import (
 	dynamoTypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.opentelemetry.io/otel"
 )
 
 type SQSRepository struct {
@@ -203,10 +206,17 @@ func (r *SQSRepository) publishEvent(ctx context.Context, event ent.Event) error
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
+	attributes := messageAttributes(event)
+	attributes["ingested_at_unix_nano"] = sqsTypes.MessageAttributeValue{
+		DataType:    aws.String("String"),
+		StringValue: aws.String(strconv.FormatInt(time.Now().UTC().UnixNano(), 10)),
+	}
+	otel.GetTextMapPropagator().Inject(ctx, messageAttributeCarrier(attributes))
+
 	_, err = r.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:          aws.String(r.queueURL),
 		MessageBody:       aws.String(string(body)),
-		MessageAttributes: messageAttributes(event),
+		MessageAttributes: attributes,
 	})
 	if err != nil {
 		return fmt.Errorf("send sqs message: %w", err)
@@ -226,4 +236,31 @@ func messageAttributes(event ent.Event) map[string]sqsTypes.MessageAttributeValu
 			StringValue: aws.String(event.ID),
 		},
 	}
+}
+
+type messageAttributeCarrier map[string]sqsTypes.MessageAttributeValue
+
+func (c messageAttributeCarrier) Get(key string) string {
+	attribute, ok := c[key]
+	if !ok || attribute.StringValue == nil {
+		return ""
+	}
+
+	return aws.ToString(attribute.StringValue)
+}
+
+func (c messageAttributeCarrier) Set(key, value string) {
+	c[key] = sqsTypes.MessageAttributeValue{
+		DataType:    aws.String("String"),
+		StringValue: aws.String(value),
+	}
+}
+
+func (c messageAttributeCarrier) Keys() []string {
+	keys := make([]string, 0, len(c))
+	for key := range c {
+		keys = append(keys, key)
+	}
+
+	return keys
 }

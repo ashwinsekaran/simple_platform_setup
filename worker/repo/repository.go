@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
 )
@@ -14,5 +15,7 @@ type EventRepository interface {
 
 type ReceivedEvent struct {
 	Event         ent.Event
+	Attributes    map[string]string
+	IngestedAt    time.Time
 	ReceiptHandle string
 }

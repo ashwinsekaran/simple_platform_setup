@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
@@ -69,8 +71,25 @@ func (r *SQSRepository) ReceiveEvents(ctx context.Context, maxMessages int32) ([
 			return nil, fmt.Errorf("unmarshal message: %w", err)
 		}
 
+		attributes := make(map[string]string, len(message.MessageAttributes))
+		for key, attribute := range message.MessageAttributes {
+			if attribute.StringValue != nil {
+				attributes[key] = aws.ToString(attribute.StringValue)
+			}
+		}
+
+		var ingestedAt time.Time
+		if value, ok := attributes["ingested_at_unix_nano"]; ok {
+			nanos, err := strconv.ParseInt(value, 10, 64)
+			if err == nil {
+				ingestedAt = time.Unix(0, nanos).UTC()
+			}
+		}
+
 		events = append(events, ReceivedEvent{
 			Event:         event,
+			Attributes:    attributes,
+			IngestedAt:    ingestedAt,
 			ReceiptHandle: aws.ToString(message.ReceiptHandle),
 		})
 	}

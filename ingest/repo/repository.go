@@ -12,6 +12,6 @@ var ErrEventConflict = errors.New("event already exists with different content")
 
 type EventRepository interface {
 	SaveEvent(ctx context.Context, event ent.Event) (created bool, err error)
-	GetEvent(ctx context.Context, id string) (ent.Event, error)
+	GetEvent(ctx context.Context, id string) (ent.EventRecord, error)
 	Ready(ctx context.Context) error
 }

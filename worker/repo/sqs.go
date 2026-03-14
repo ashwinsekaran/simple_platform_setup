@@ -10,12 +10,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamoTypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 )
 
 type SQSRepository struct {
-	client   *sqs.Client
-	queueURL string
+	sqsClient *sqs.Client
+	ddbClient *dynamodb.Client
+	queueURL  string
+	tableName string
 }
 
 func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, error) {
@@ -40,13 +44,15 @@ func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, e
 	}
 
 	return &SQSRepository{
-		client:   sqs.NewFromConfig(awsCfg),
-		queueURL: cfg.SQSQueueURL,
+		sqsClient: sqs.NewFromConfig(awsCfg),
+		ddbClient: dynamodb.NewFromConfig(awsCfg),
+		queueURL:  cfg.SQSQueueURL,
+		tableName: cfg.DynamoTableName,
 	}, nil
 }
 
 func (r *SQSRepository) ReceiveEvents(ctx context.Context, maxMessages int32) ([]ReceivedEvent, error) {
-	output, err := r.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+	output, err := r.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(r.queueURL),
 		MaxNumberOfMessages: maxMessages,
 		WaitTimeSeconds:     20,
@@ -73,12 +79,31 @@ func (r *SQSRepository) ReceiveEvents(ctx context.Context, maxMessages int32) ([
 }
 
 func (r *SQSRepository) DeleteEvent(ctx context.Context, receiptHandle string) error {
-	_, err := r.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+	_, err := r.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(r.queueURL),
 		ReceiptHandle: aws.String(receiptHandle),
 	})
 	if err != nil {
 		return fmt.Errorf("delete message: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQSRepository) UpdateProcessingResult(ctx context.Context, id, status, result string) error {
+	_, err := r.ddbClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]dynamoTypes.AttributeValue{
+			"id": &dynamoTypes.AttributeValueMemberS{Value: id},
+		},
+		UpdateExpression: aws.String("SET processing_status = :status, processing_result = :result"),
+		ExpressionAttributeValues: map[string]dynamoTypes.AttributeValue{
+			":status": &dynamoTypes.AttributeValueMemberS{Value: status},
+			":result": &dynamoTypes.AttributeValueMemberS{Value: result},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("update processing result: %w", err)
 	}
 
 	return nil

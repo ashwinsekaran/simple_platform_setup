@@ -89,11 +89,13 @@ func TestPostEventReturnsConflictWhenExistingEventDiffers(t *testing.T) {
 
 func TestGetEventReturnsEventByID(t *testing.T) {
 	server := NewIngestServer(stubEventRepository{
-		events: map[string]ent.Event{
+		records: map[string]ent.EventRecord{
 			"evt-1": {
-				ID:      "evt-1",
-				Type:    "user.created",
-				Payload: json.RawMessage(`{"name":"Ada"}`),
+				ID:               "evt-1",
+				Type:             "user.created",
+				Payload:          json.RawMessage(`{"name":"Ada"}`),
+				ProcessingStatus: "processed",
+				ProcessingResult: "worker processed event successfully",
 			},
 		},
 	})
@@ -163,23 +165,28 @@ func TestReadyReturnsServiceUnavailableWhenRepoIsNotReady(t *testing.T) {
 type stubEventRepository struct {
 	err      error
 	readyErr error
-	events   map[string]ent.Event
+	records  map[string]ent.EventRecord
 	created  bool
 }
 
 func (s stubEventRepository) SaveEvent(_ context.Context, event ent.Event) (bool, error) {
-	if s.events == nil {
+	if s.records == nil {
 		return s.created, s.err
 	}
 
-	s.events[event.ID] = event
+	s.records[event.ID] = ent.EventRecord{
+		ID:               event.ID,
+		Type:             event.Type,
+		Payload:          event.Payload,
+		ProcessingStatus: "queued",
+	}
 	return s.created, s.err
 }
 
-func (s stubEventRepository) GetEvent(_ context.Context, id string) (ent.Event, error) {
-	event, ok := s.events[id]
+func (s stubEventRepository) GetEvent(_ context.Context, id string) (ent.EventRecord, error) {
+	event, ok := s.records[id]
 	if !ok {
-		return ent.Event{}, repo.ErrEventNotFound
+		return ent.EventRecord{}, repo.ErrEventNotFound
 	}
 
 	return event, nil

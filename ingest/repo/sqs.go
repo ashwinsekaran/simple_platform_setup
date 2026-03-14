@@ -26,10 +26,12 @@ type SQSRepository struct {
 }
 
 type storedEvent struct {
-	ID        string `dynamodbav:"id"`
-	Type      string `dynamodbav:"type"`
-	Payload   string `dynamodbav:"payload"`
-	Published bool   `dynamodbav:"published"`
+	ID               string `dynamodbav:"id"`
+	Type             string `dynamodbav:"type"`
+	Payload          string `dynamodbav:"payload"`
+	Published        bool   `dynamodbav:"published"`
+	ProcessingStatus string `dynamodbav:"processing_status"`
+	ProcessingResult string `dynamodbav:"processing_result"`
 }
 
 func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, error) {
@@ -63,10 +65,12 @@ func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, e
 
 func (r *SQSRepository) SaveEvent(ctx context.Context, event ent.Event) (bool, error) {
 	item := storedEvent{
-		ID:        event.ID,
-		Type:      event.Type,
-		Payload:   string(event.Payload),
-		Published: false,
+		ID:               event.ID,
+		Type:             event.Type,
+		Payload:          string(event.Payload),
+		Published:        false,
+		ProcessingStatus: "queued",
+		ProcessingResult: "",
 	}
 
 	av, err := attributevalue.MarshalMap(item)
@@ -120,16 +124,18 @@ func (r *SQSRepository) SaveEvent(ctx context.Context, event ent.Event) (bool, e
 	return false, nil
 }
 
-func (r *SQSRepository) GetEvent(ctx context.Context, id string) (ent.Event, error) {
+func (r *SQSRepository) GetEvent(ctx context.Context, id string) (ent.EventRecord, error) {
 	item, err := r.getStoredEvent(ctx, id)
 	if err != nil {
-		return ent.Event{}, err
+		return ent.EventRecord{}, err
 	}
 
-	return ent.Event{
-		ID:      item.ID,
-		Type:    item.Type,
-		Payload: json.RawMessage(item.Payload),
+	return ent.EventRecord{
+		ID:               item.ID,
+		Type:             item.Type,
+		Payload:          json.RawMessage(item.Payload),
+		ProcessingStatus: item.ProcessingStatus,
+		ProcessingResult: item.ProcessingResult,
 	}, nil
 }
 

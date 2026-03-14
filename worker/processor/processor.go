@@ -76,5 +76,9 @@ func (p *Processor) processEvent(ctx context.Context, received repo.ReceivedEven
 		received.Event.Payload,
 	)
 
+	if err := p.repo.UpdateProcessingResult(ctx, received.Event.ID, "processed", "worker processed event successfully"); err != nil {
+		return err
+	}
+
 	return p.repo.DeleteEvent(ctx, received.ReceiptHandle)
 }

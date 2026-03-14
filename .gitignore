@@ -27,6 +27,14 @@ go.work.sum
 # env file
 .env
 
+# Local development artifacts
+localstack-data/
+infra/tf/.terraform/
+infra/tf/.terraform.lock.hcl
+infra/tf/terraform.tfstate
+infra/tf/terraform.tfstate.backup
+infra/tf/build/*.zip
+
 # Editor/IDE
 .idea/
 # .vscode/

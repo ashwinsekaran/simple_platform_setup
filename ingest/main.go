@@ -10,13 +10,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/handlers"
+	"github.com/ashwinsekaran/simple_platform_app/ingest/repo"
 )
 
 func main() {
-	ingestServer := handlers.NewIngestServer()
+	cfg := config.Load()
+
+	eventRepo, err := repo.NewSQSRepository(context.Background(), cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ingestServer := handlers.NewIngestServer(eventRepo)
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.HTTPAddr,
 		Handler: ingestServer.Handler(),
 	}
 
@@ -34,14 +43,14 @@ func main() {
 	defer signal.Stop(shutdownSignals)
 
 	select {
-	case err := <-serverErrors:
+	case err = <-serverErrors:
 		if err != nil {
 			log.Fatal(err)
 		}
 	case sig := <-shutdownSignals:
 		log.Printf("shutdown signal received: %s", sig)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutS)*time.Second)
 		defer cancel()
 
 		if err := httpServer.Shutdown(ctx); err != nil {

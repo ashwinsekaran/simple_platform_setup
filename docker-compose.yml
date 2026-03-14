@@ -1,0 +1,16 @@
+services:
+  localstack:
+    image: localstack/localstack:3.0
+    environment:
+      - SERVICES=sqs,dynamodb,lambda,iam
+      - EDGE_PORT=4566
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DEBUG=1
+    ports:
+      - "4566:4566"
+    volumes:
+      - "./localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+

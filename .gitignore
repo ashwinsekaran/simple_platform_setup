@@ -34,6 +34,7 @@ infra/tf/.terraform.lock.hcl
 infra/tf/terraform.tfstate
 infra/tf/terraform.tfstate.backup
 infra/tf/build/*.zip
+infra/tf/.terraform.tfstate.lock.info
 
 # Editor/IDE
 .idea/

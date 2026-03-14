@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
@@ -17,6 +18,8 @@ import (
 type SQSRepository struct {
 	client   *sqs.Client
 	queueURL string
+	mu       sync.RWMutex
+	events   map[string]ent.Event
 }
 
 func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, error) {
@@ -43,6 +46,7 @@ func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, e
 	return &SQSRepository{
 		client:   sqs.NewFromConfig(awsCfg),
 		queueURL: cfg.SQSQueueURL,
+		events:   make(map[string]ent.Event),
 	}, nil
 }
 
@@ -68,6 +72,33 @@ func (r *SQSRepository) PublishEvent(ctx context.Context, event ent.Event) error
 	})
 	if err != nil {
 		return fmt.Errorf("send sqs message: %w", err)
+	}
+
+	r.mu.Lock()
+	r.events[event.ID] = event
+	r.mu.Unlock()
+
+	return nil
+}
+
+func (r *SQSRepository) GetEvent(_ context.Context, id string) (ent.Event, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	event, ok := r.events[id]
+	if !ok {
+		return ent.Event{}, ErrEventNotFound
+	}
+
+	return event, nil
+}
+
+func (r *SQSRepository) Ready(ctx context.Context) error {
+	_, err := r.client.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+		QueueUrl: aws.String(r.queueURL),
+	})
+	if err != nil {
+		return fmt.Errorf("check queue readiness: %w", err)
 	}
 
 	return nil

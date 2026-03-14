@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/ashwinsekaran/simple_platform_app/common"
 	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
@@ -26,7 +27,10 @@ func (s *IngestServer) Handler() http.Handler {
 
 func (s *IngestServer) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", s.HandleHealth)
+	mux.HandleFunc("GET /ready", s.HandleReady)
 	mux.HandleFunc("POST /events", s.HandlePostEvent)
+	mux.HandleFunc("GET /events/{id}", s.HandleGetEvent)
 	return mux
 }
 
@@ -74,4 +78,52 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
 	common.WriteJSON(w, http.StatusAccepted, event)
+}
+
+func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		common.WriteJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "event id is required",
+		})
+		return
+	}
+
+	event, err := s.repo.GetEvent(r.Context(), id)
+	if err != nil {
+		if err == repo.ErrEventNotFound {
+			common.WriteJSON(w, http.StatusNotFound, map[string]string{
+				"error": "event not found",
+			})
+			return
+		}
+
+		log.Printf("get event failed: %v", err)
+		common.WriteJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to get event",
+		})
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, event)
+}
+
+func (s *IngestServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"status": "ok",
+	})
+}
+
+func (s *IngestServer) HandleReady(w http.ResponseWriter, r *http.Request) {
+	if err := s.repo.Ready(r.Context()); err != nil {
+		log.Printf("readiness check failed: %v", err)
+		common.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"status": "not_ready",
+		})
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"status": "ready",
+	})
 }

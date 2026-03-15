@@ -42,3 +42,8 @@ variable "table_name" {
   type    = string
   default = "ingest-events"
 }
+
+variable "lambda_function_name" {
+  type    = string
+  default = "ingest-events-processor"
+}

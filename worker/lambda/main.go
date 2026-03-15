@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/ashwinsekaran/simple_platform_app/monitoring/telemetry"
 	"github.com/ashwinsekaran/simple_platform_app/worker/config"
-	"github.com/ashwinsekaran/simple_platform_app/worker/processor"
+	"github.com/ashwinsekaran/simple_platform_app/worker/lambda/service"
 	"github.com/ashwinsekaran/simple_platform_app/worker/repo"
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
 func main() {
@@ -34,12 +33,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	eventProcessor := processor.New(eventRepo)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	if err := eventProcessor.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatal(err)
-	}
+	eventService := service.New(eventRepo)
+	lambda.Start(func(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
+		return eventService.Process(ctx, event)
+	})
 }

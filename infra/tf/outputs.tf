@@ -17,3 +17,7 @@ output "ingest_dlq_queue_url" {
 output "ingest_table_name" {
   value = aws_dynamodb_table.ingest_events.name
 }
+
+output "worker_lambda_name" {
+  value = aws_lambda_function.worker.function_name
+}

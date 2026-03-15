@@ -56,22 +56,6 @@ func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, e
 	}, nil
 }
 
-func (r *SQSRepository) ReceiveEvents(ctx context.Context, maxMessages int32) ([]ReceivedEvent, error) {
-	return r.receiveFromQueue(ctx, r.queueURL, maxMessages)
-}
-
-func (r *SQSRepository) DeleteEvent(ctx context.Context, receiptHandle string) error {
-	_, err := r.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(r.queueURL),
-		ReceiptHandle: aws.String(receiptHandle),
-	})
-	if err != nil {
-		return fmt.Errorf("delete message: %w", err)
-	}
-
-	return nil
-}
-
 func (r *SQSRepository) ReceiveDLQEvents(ctx context.Context, maxMessages int32) ([]ReceivedEvent, error) {
 	if r.dlqURL == "" {
 		return nil, fmt.Errorf("dlq queue url is not configured")

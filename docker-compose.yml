@@ -4,6 +4,7 @@ services:
     environment:
       - SERVICES=sqs,dynamodb,lambda,iam
       - EDGE_PORT=4566
+      - LAMBDA_DOCKER_NETWORK=simple_platform_setup_default
       - AWS_DEFAULT_REGION=${AWS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -11,7 +12,6 @@ services:
     ports:
       - "4566:4566"
     volumes:
-      - "./localstack-data:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
 
   otel-collector:

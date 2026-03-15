@@ -20,6 +20,8 @@ provider "aws" {
 
   endpoints {
     dynamodb = var.aws_endpoint_url
+    iam      = var.aws_endpoint_url
+    lambda   = var.aws_endpoint_url
     sqs      = var.aws_endpoint_url
   }
 }

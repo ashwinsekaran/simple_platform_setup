@@ -64,6 +64,10 @@ demo:
 	echo "Prometheus: http://localhost:9090"; \
 	echo "Grafana: http://localhost:3000 (admin/admin)"; \
 	echo "Sample event id: $$EVENT_ID"; \
+	echo "POST sample:"; \
+	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"1\",\"type\":\"user.created\",\"payload\":{\"name\":\"Ada\"}}'"; \
+	echo "GET sample:"; \
+	echo "curl $$API_URL/events/1"; \
 	echo ""; \
 	wait
 

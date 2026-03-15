@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
@@ -19,6 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 type SQSRepository struct {
@@ -26,6 +29,14 @@ type SQSRepository struct {
 	ddbClient *dynamodb.Client
 	queueURL  string
 	tableName string
+}
+
+var repoMetrics struct {
+	once               sync.Once
+	dynamoDurationMS   metric.Float64Histogram
+	dynamoErrors       metric.Int64Counter
+	sqsPublishDuration metric.Float64Histogram
+	sqsPublishErrors   metric.Int64Counter
 }
 
 type storedEvent struct {
@@ -81,14 +92,17 @@ func (r *SQSRepository) SaveEvent(ctx context.Context, event ent.Event) (bool, e
 		return false, fmt.Errorf("marshal event item: %w", err)
 	}
 
+	start := time.Now()
 	_, err = r.ddbClient.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:           aws.String(r.tableName),
 		Item:                av,
 		ConditionExpression: aws.String("attribute_not_exists(id)"),
 	})
+	repoInstruments().dynamoDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "put_item")))
 	if err != nil {
 		var conditionalCheck *dynamoTypes.ConditionalCheckFailedException
 		if !errors.As(err, &conditionalCheck) {
+			repoInstruments().dynamoErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "put_item")))
 			return false, fmt.Errorf("store event: %w", err)
 		}
 
@@ -143,22 +157,31 @@ func (r *SQSRepository) GetEvent(ctx context.Context, id string) (ent.EventRecor
 }
 
 func (r *SQSRepository) Ready(ctx context.Context) error {
+	start := time.Now()
 	if _, err := r.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
 		QueueUrl: aws.String(r.queueURL),
 	}); err != nil {
+		repoInstruments().sqsPublishErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "queue_readiness")))
 		return fmt.Errorf("check queue readiness: %w", err)
+	} else {
+		repoInstruments().sqsPublishDuration.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "queue_readiness")))
 	}
 
+	start = time.Now()
 	if _, err := r.ddbClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 		TableName: aws.String(r.tableName),
 	}); err != nil {
+		repoInstruments().dynamoErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "describe_table")))
 		return fmt.Errorf("check dynamodb readiness: %w", err)
+	} else {
+		repoInstruments().dynamoDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "describe_table")))
 	}
 
 	return nil
 }
 
 func (r *SQSRepository) getStoredEvent(ctx context.Context, id string) (storedEvent, error) {
+	start := time.Now()
 	output, err := r.ddbClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(r.tableName),
 		Key: map[string]dynamoTypes.AttributeValue{
@@ -166,7 +189,9 @@ func (r *SQSRepository) getStoredEvent(ctx context.Context, id string) (storedEv
 		},
 		ConsistentRead: aws.Bool(true),
 	})
+	repoInstruments().dynamoDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "get_item")))
 	if err != nil {
+		repoInstruments().dynamoErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "get_item")))
 		return storedEvent{}, fmt.Errorf("get event: %w", err)
 	}
 
@@ -183,6 +208,7 @@ func (r *SQSRepository) getStoredEvent(ctx context.Context, id string) (storedEv
 }
 
 func (r *SQSRepository) markPublished(ctx context.Context, id string) error {
+	start := time.Now()
 	_, err := r.ddbClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(r.tableName),
 		Key: map[string]dynamoTypes.AttributeValue{
@@ -193,7 +219,9 @@ func (r *SQSRepository) markPublished(ctx context.Context, id string) error {
 			":published": &dynamoTypes.AttributeValueMemberBOOL{Value: true},
 		},
 	})
+	repoInstruments().dynamoDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "update_item")))
 	if err != nil {
+		repoInstruments().dynamoErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "update_item")))
 		return fmt.Errorf("mark event published: %w", err)
 	}
 
@@ -213,16 +241,37 @@ func (r *SQSRepository) publishEvent(ctx context.Context, event ent.Event) error
 	}
 	otel.GetTextMapPropagator().Inject(ctx, messageAttributeCarrier(attributes))
 
+	start := time.Now()
 	_, err = r.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:          aws.String(r.queueURL),
 		MessageBody:       aws.String(string(body)),
 		MessageAttributes: attributes,
 	})
+	repoInstruments().sqsPublishDuration.Record(ctx, float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("operation", "send_message")))
 	if err != nil {
+		repoInstruments().sqsPublishErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("operation", "send_message")))
 		return fmt.Errorf("send sqs message: %w", err)
 	}
 
 	return nil
+}
+
+func repoInstruments() *struct {
+	once               sync.Once
+	dynamoDurationMS   metric.Float64Histogram
+	dynamoErrors       metric.Int64Counter
+	sqsPublishDuration metric.Float64Histogram
+	sqsPublishErrors   metric.Int64Counter
+} {
+	repoMetrics.once.Do(func() {
+		meter := otel.Meter("simple_platform_setup/ingest_repo")
+		repoMetrics.dynamoDurationMS, _ = meter.Float64Histogram("ingest_dynamodb_operation_duration_ms")
+		repoMetrics.dynamoErrors, _ = meter.Int64Counter("ingest_dynamodb_error_total")
+		repoMetrics.sqsPublishDuration, _ = meter.Float64Histogram("ingest_sqs_operation_duration_ms")
+		repoMetrics.sqsPublishErrors, _ = meter.Int64Counter("ingest_sqs_error_total")
+	})
+
+	return &repoMetrics
 }
 
 func messageAttributes(event ent.Event) map[string]sqsTypes.MessageAttributeValue {

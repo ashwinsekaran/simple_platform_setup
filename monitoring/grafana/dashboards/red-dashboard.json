@@ -77,8 +77,7 @@
         "defaults": {
           "color": {
             "mode": "palette-classic"
-          },
-          "unit": "reqps"
+          }
         },
         "overrides": []
       },
@@ -107,7 +106,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(ingest_error_total[5m]))",
+          "expr": "sum(increase(ingest_error_total[$__rate_interval]))",
           "legendFormat": "ingest errors",
           "refId": "A"
         }
@@ -171,16 +170,328 @@
         "defaults": {
           "color": {
             "mode": "palette-classic"
-          },
-          "unit": "ops"
+          }
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 8
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(ingest_idempotent_replay_total[$__rate_interval]))",
+          "legendFormat": "idempotent replays",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingest Replays",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 8
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(ingest_conflict_total[$__rate_interval]))",
+          "legendFormat": "conflicts",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingest Conflicts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 8
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (increase(ingest_validation_failure_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingest Validation Failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(ingest_dynamodb_operation_duration_ms_bucket[5m])) by (le, operation))",
+          "legendFormat": "ddb {{operation}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(ingest_sqs_operation_duration_ms_bucket[5m])) by (le, operation))",
+          "legendFormat": "sqs {{operation}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Ingest Dependency Duration P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(ingest_created_total[$__rate_interval]))",
+          "legendFormat": "ingest accepted",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(worker_processed_total[$__rate_interval]))",
+          "legendFormat": "worker processed",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(worker_error_total[$__rate_interval]))",
+          "legendFormat": "worker failed",
+          "refId": "C"
+        }
+      ],
+      "title": "Pipeline Comparison",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "last_over_time(worker_dlq_message_count[$__rate_interval])",
+          "legendFormat": "dlq queued",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(worker_dlq_replay_total[$__rate_interval]))",
+          "legendFormat": "dlq replayed",
+          "refId": "B"
+        }
+      ],
+      "title": "DLQ Overview",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 24
       },
       "id": 4,
       "options": {
@@ -201,12 +512,12 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(worker_processed_total[5m]))",
-          "legendFormat": "worker processed",
+          "expr": "sum(increase(worker_processed_total[$__rate_interval]))",
+          "legendFormat": "processed",
           "refId": "A"
         }
       ],
-      "title": "Worker Success Rate",
+      "title": "Worker Processed Count",
       "type": "timeseries"
     },
     {
@@ -218,16 +529,15 @@
         "defaults": {
           "color": {
             "mode": "palette-classic"
-          },
-          "unit": "ops"
+          }
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 8
+        "w": 6,
+        "x": 6,
+        "y": 24
       },
       "id": 5,
       "options": {
@@ -248,12 +558,59 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(worker_error_total[5m]))",
-          "legendFormat": "worker errors",
+          "expr": "sum(increase(worker_error_total[$__rate_interval]))",
+          "legendFormat": "errors",
           "refId": "A"
         }
       ],
-      "title": "Worker Errors",
+      "title": "Worker Error Count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "100 * sum(increase(worker_error_total[$__rate_interval])) / clamp_min(sum(increase(worker_processed_total[$__rate_interval])) + sum(increase(worker_error_total[$__rate_interval])), 1)",
+          "legendFormat": "error %",
+          "refId": "A"
+        }
+      ],
+      "title": "Worker Error Percentage",
       "type": "timeseries"
     },
     {
@@ -272,9 +629,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 8
+        "w": 6,
+        "x": 18,
+        "y": 24
       },
       "id": 6,
       "options": {
@@ -295,12 +652,30 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(worker_end_to_end_latency_ms_bucket[5m])) by (le))",
-          "legendFormat": "worker p95",
+          "expr": "histogram_quantile(0.50, sum(rate(worker_end_to_end_latency_ms_bucket[5m])) by (le))",
+          "legendFormat": "p50",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(worker_end_to_end_latency_ms_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(worker_end_to_end_latency_ms_bucket[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
         }
       ],
-      "title": "Worker Duration P95",
+      "title": "Worker End-to-End Latency",
       "type": "timeseries"
     }
   ],

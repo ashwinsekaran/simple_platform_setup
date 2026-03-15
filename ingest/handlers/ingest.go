@@ -23,11 +23,15 @@ type IngestServer struct {
 }
 
 var ingestMetrics struct {
-	once       sync.Once
-	requests   metric.Int64Counter
-	successes  metric.Int64Counter
-	errors     metric.Int64Counter
-	durationMS metric.Float64Histogram
+	once              sync.Once
+	requests          metric.Int64Counter
+	successes         metric.Int64Counter
+	errors            metric.Int64Counter
+	durationMS        metric.Float64Histogram
+	replays           metric.Int64Counter
+	conflicts         metric.Int64Counter
+	validationFailure metric.Int64Counter
+	created           metric.Int64Counter
 }
 
 func NewIngestServer(eventRepo repo.EventRepository) *IngestServer {
@@ -67,6 +71,7 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		instruments.errors.Add(ctx, 1)
+		instruments.validationFailure.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "invalid_json_body")))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "invalid JSON body")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
@@ -77,6 +82,7 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 
 	if request.ID == "" || request.Type == "" || len(request.Payload) == 0 {
 		instruments.errors.Add(ctx, 1)
+		instruments.validationFailure.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "missing_required_fields")))
 		span.SetStatus(codes.Error, "missing required fields")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "id, type, and payload are required",
@@ -86,6 +92,7 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 
 	if !json.Valid(request.Payload) {
 		instruments.errors.Add(ctx, 1)
+		instruments.validationFailure.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "invalid_payload_json")))
 		span.SetStatus(codes.Error, "payload must be valid JSON")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "payload must be valid JSON",
@@ -107,6 +114,7 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == repo.ErrEventConflict {
 			instruments.errors.Add(ctx, 1)
+			instruments.conflicts.Add(ctx, 1)
 			span.SetStatus(codes.Error, "event conflict")
 			WriteJSON(w, http.StatusConflict, map[string]string{
 				"error": "event id already exists with different content",
@@ -126,12 +134,14 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 
 	if created {
 		instruments.successes.Add(ctx, 1)
+		instruments.created.Add(ctx, 1)
 		telemetry.Log(ctx, "stored and published event: id=%s type=%s payload=%s", event.ID, event.Type, event.Payload)
 		WriteJSON(w, http.StatusAccepted, event)
 		return
 	}
 
 	instruments.successes.Add(ctx, 1)
+	instruments.replays.Add(ctx, 1)
 	telemetry.Log(ctx, "idempotent replay ignored for event: id=%s", event.ID)
 	WriteJSON(w, http.StatusOK, event)
 }
@@ -149,6 +159,7 @@ func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		instruments.errors.Add(ctx, 1)
+		instruments.validationFailure.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "missing_event_id")))
 		span.SetStatus(codes.Error, "missing event id")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "event id is required",
@@ -206,11 +217,15 @@ func (s *IngestServer) HandleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func ingestInstruments() *struct {
-	once       sync.Once
-	requests   metric.Int64Counter
-	successes  metric.Int64Counter
-	errors     metric.Int64Counter
-	durationMS metric.Float64Histogram
+	once              sync.Once
+	requests          metric.Int64Counter
+	successes         metric.Int64Counter
+	errors            metric.Int64Counter
+	durationMS        metric.Float64Histogram
+	replays           metric.Int64Counter
+	conflicts         metric.Int64Counter
+	validationFailure metric.Int64Counter
+	created           metric.Int64Counter
 } {
 	ingestMetrics.once.Do(func() {
 		meter := otel.Meter("simple_platform_setup/ingest")
@@ -218,6 +233,10 @@ func ingestInstruments() *struct {
 		ingestMetrics.successes, _ = meter.Int64Counter("ingest_success_total")
 		ingestMetrics.errors, _ = meter.Int64Counter("ingest_error_total")
 		ingestMetrics.durationMS, _ = meter.Float64Histogram("ingest_request_duration_ms")
+		ingestMetrics.created, _ = meter.Int64Counter("ingest_created_total")
+		ingestMetrics.replays, _ = meter.Int64Counter("ingest_idempotent_replay_total")
+		ingestMetrics.conflicts, _ = meter.Int64Counter("ingest_conflict_total")
+		ingestMetrics.validationFailure, _ = meter.Int64Counter("ingest_validation_failure_total")
 	})
 
 	return &ingestMetrics

@@ -28,6 +28,16 @@ variable "queue_name" {
   default = "ingest-events"
 }
 
+variable "dlq_queue_name" {
+  type    = string
+  default = "ingest-events-dlq"
+}
+
+variable "max_receive_count" {
+  type    = number
+  default = 3
+}
+
 variable "table_name" {
   type    = string
   default = "ingest-events"

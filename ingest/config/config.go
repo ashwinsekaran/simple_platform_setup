@@ -11,6 +11,7 @@ type Config struct {
 	AWSSecretKey     string
 	DynamoTableName  string
 	SQSQueueURL      string
+	DLQQueueURL      string
 	ShutdownTimeoutS int
 }
 
@@ -24,6 +25,7 @@ func Load() Config {
 		AWSSecretKey:     getEnv("AWS_SECRET_ACCESS_KEY", "test"),
 		DynamoTableName:  getEnv("INGEST_DYNAMODB_TABLE", "ingest-events"),
 		SQSQueueURL:      getEnv("INGEST_SQS_QUEUE_URL", "http://localhost:4566/000000000000/ingest-events"),
+		DLQQueueURL:      getEnv("INGEST_DLQ_QUEUE_URL", ""),
 		ShutdownTimeoutS: 5,
 	}
 }

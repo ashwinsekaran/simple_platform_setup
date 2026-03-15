@@ -9,7 +9,17 @@ resource "aws_sqs_queue" "ingest_events" {
   name                       = var.queue_name
   visibility_timeout_seconds = 30
   message_retention_seconds  = 345600
-  tags                       = local.common_tags
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.ingest_events_dlq.arn
+    maxReceiveCount     = var.max_receive_count
+  })
+  tags = local.common_tags
+}
+
+resource "aws_sqs_queue" "ingest_events_dlq" {
+  name                      = var.dlq_queue_name
+  message_retention_seconds = 1209600
+  tags                      = local.common_tags
 }
 
 resource "aws_dynamodb_table" "ingest_events" {

@@ -15,7 +15,7 @@ TF_DIR ?= infra/tf
 demo:
 	@test -n "$(AWS_ACCESS_KEY_ID)" || (echo "AWS_ACCESS_KEY_ID is required" && exit 1)
 	@test -n "$(AWS_SECRET_ACCESS_KEY)" || (echo "AWS_SECRET_ACCESS_KEY is required" && exit 1)
-	docker compose up -d localstack otel-collector
+	docker compose up -d localstack jaeger otel-collector
 	TF_VAR_aws_access_key_id="$(AWS_ACCESS_KEY_ID)" \
 	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
 	terraform -chdir=$(TF_DIR) init

@@ -15,7 +15,7 @@ TF_DIR ?= infra/tf
 demo:
 	@test -n "$(AWS_ACCESS_KEY_ID)" || (echo "AWS_ACCESS_KEY_ID is required" && exit 1)
 	@test -n "$(AWS_SECRET_ACCESS_KEY)" || (echo "AWS_SECRET_ACCESS_KEY is required" && exit 1)
-	docker compose up -d localstack
+	docker compose up -d localstack otel-collector
 	TF_VAR_aws_access_key_id="$(AWS_ACCESS_KEY_ID)" \
 	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
 	terraform -chdir=$(TF_DIR) init
@@ -29,6 +29,7 @@ demo:
 	AWS_ENDPOINT_URL="$(AWS_ENDPOINT_URL)" \
 	AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" \
 	AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
+	OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317" \
 	INGEST_HTTP_ADDR="$(INGEST_HTTP_ADDR)" \
 	INGEST_DYNAMODB_TABLE="$$TABLE_NAME" \
 	INGEST_SQS_QUEUE_URL="$$QUEUE_URL" \
@@ -37,6 +38,7 @@ demo:
 	AWS_ENDPOINT_URL="$(AWS_ENDPOINT_URL)" \
 	AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" \
 	AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
+	OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317" \
 	INGEST_SQS_QUEUE_URL="$$QUEUE_URL" \
 	go run ./worker & \
 	wait

@@ -17,7 +17,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	shutdownTelemetry, err := telemetry.Init(context.Background(), "worker")
+	shutdownTelemetry, err := telemetry.Init(context.Background(), "worker", cfg.OTELEndpoint)
 	if err != nil {
 		log.Fatal(err)
 	}

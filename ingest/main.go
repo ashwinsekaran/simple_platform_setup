@@ -19,7 +19,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	shutdownTelemetry, err := telemetry.Init(context.Background(), "ingest")
+	shutdownTelemetry, err := telemetry.Init(context.Background(), "ingest", cfg.OTELEndpoint)
 	if err != nil {
 		log.Fatal(err)
 	}

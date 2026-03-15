@@ -3,18 +3,19 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
-func Init(ctx context.Context, serviceName string) (func(context.Context) error, error) {
+func Init(ctx context.Context, serviceName, endpoint string) (func(context.Context) error, error) {
 	res, err := resource.Merge(
 		resource.Default(),
 		resource.NewWithAttributes(
@@ -26,12 +27,20 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 		return nil, fmt.Errorf("create telemetry resource: %w", err)
 	}
 
-	traceExporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	traceExporter, err := otlptracegrpc.New(
+		ctx,
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create trace exporter: %w", err)
 	}
 
-	metricExporter, err := stdoutmetric.New()
+	metricExporter, err := otlpmetricgrpc.New(
+		ctx,
+		otlpmetricgrpc.WithEndpoint(endpoint),
+		otlpmetricgrpc.WithInsecure(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create metric exporter: %w", err)
 	}
@@ -41,7 +50,7 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 		sdktrace.WithResource(res),
 	)
 	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+		metric.WithReader(metric.NewPeriodicReader(metricExporter, metric.WithInterval(5*time.Second))),
 		metric.WithResource(res),
 	)
 

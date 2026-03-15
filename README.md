@@ -39,7 +39,7 @@ Main folders:
 - [ingest](/Users/ashwinsekaran/Work/github/simple_platform_setup/ingest)
   HTTP API, validation, idempotent write path, read path
 - [worker](/Users/ashwinsekaran/Work/github/simple_platform_setup/worker)
-  Lambda handler, DLQ inspect/replay helpers, worker-side repo code
+  Lambda handler, DLQ inspect/replay/monitor helpers, worker-side repo code
 - [infra/tf](/Users/ashwinsekaran/Work/github/simple_platform_setup/infra/tf)
   Terraform for SQS, DLQ, DynamoDB, Lambda, IAM, event source mapping
 - [monitoring](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring)
@@ -242,11 +242,20 @@ Result:
 
 Metrics emitted:
 - ingest request rate
-- ingest success/error counts
+- ingest error count
 - ingest request duration
+- ingest idempotent replay count
+- ingest conflict count
+- ingest validation failure count
+- ingest dependency latency/error metrics for DynamoDB and SQS
+- ingest accepted event count
 - worker processed count
 - worker error count
+- worker error percentage
 - worker end-to-end latency
+- main queue depth
+- DLQ depth
+- DLQ replay count
 
 ### Logs
 
@@ -257,6 +266,40 @@ Metrics emitted:
 
 RED dashboard:
 - [monitoring/grafana/dashboards/red-dashboard.json](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring/grafana/dashboards/red-dashboard.json)
+
+Current Grafana panels:
+- `Ingest Rate`
+  Requests per second for the ingest API
+- `Ingest Errors`
+  Recent ingest error count
+- `Ingest Duration P95`
+  P95 ingest request latency
+- `Ingest Replays`
+  Recent idempotent replay count
+- `Ingest Conflicts`
+  Recent same-id/different-content conflict count
+- `Ingest Validation Failures`
+  Recent validation failures grouped by reason
+- `Ingest Dependency Duration P95`
+  P95 DynamoDB and SQS operation latency from the ingest path
+- `Pipeline Comparison`
+  Single graph comparing ingest accepted events, worker processed events, and worker failures
+- `Queue Overview`
+  Main queue backlog, DLQ backlog, and recent DLQ replay count
+- `Worker Processed Count`
+  Recent processed event count
+- `Worker Error Count`
+  Recent worker error count
+- `Worker Error Percentage`
+  Worker error percentage over the recent window
+- `Worker End-to-End Latency`
+  Worker end-to-end latency as p50, p95, and p99
+
+Dashboard interpretation:
+- count panels answer "how many happened recently?"
+- queue panels answer "how much backlog exists right now?"
+- latency panels answer "how long is the path taking?"
+- the `Pipeline Comparison` panel is the quickest way to compare ingest and worker behavior in one view
 
 Data path:
 - app -> OTel Collector -> Prometheus -> Grafana

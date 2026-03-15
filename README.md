@@ -64,16 +64,13 @@ Read flow:
 
 Prerequisites:
 - Docker / Docker Compose
-- Go
-- Terraform
-- `zip`
+- Terraform `>= 1.6.0`
 
-Set local credentials in `.env` or shell:
+Optional local credentials in `.env` or shell:
 
 ```bash
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
-AWS_REGION=us-east-1
 ```
 
 Start the full demo:
@@ -82,11 +79,13 @@ Start the full demo:
 make demo
 ```
 
+No host Go installation is required. The ingest app and Lambda artifact are both built with Docker.
+
 This will:
 - start LocalStack and the observability stack
-- build the Lambda artifact
+- build the ingest container and Lambda artifact with Docker
 - apply Terraform against LocalStack
-- start the ingest API
+- start the ingest API container
 - generate sample traffic end-to-end
 - print local URLs and sample curl commands
 
@@ -109,13 +108,13 @@ Create event:
 ```bash
 curl -X POST http://localhost:8080/events \
   -H "Content-Type: application/json" \
-  -d '{"id":"evt-1","type":"user.created","payload":{"name":"Ada"}}'
+  -d '{"id":"1","type":"user.created","payload":{"name":"Ada"}}'
 ```
 
 Read event:
 
 ```bash
-curl http://localhost:8080/events/evt-1
+curl http://localhost:8080/events/1
 ```
 
 Health:

@@ -5,14 +5,40 @@ services:
       - SERVICES=sqs,dynamodb,lambda,iam
       - EDGE_PORT=4566
       - LAMBDA_DOCKER_NETWORK=simple_platform_setup_default
-      - AWS_DEFAULT_REGION=${AWS_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
       - DEBUG=1
     ports:
       - "4566:4566"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
+
+  worker-build:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    volumes:
+      - "./infra/tf/build:/output"
+
+  ingest:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    depends_on:
+      - localstack
+      - otel-collector
+    env_file:
+      - "./.runtime/ingest.env"
+    environment:
+      - AWS_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - INGEST_HTTP_ADDR=:8080
+    ports:
+      - "8080:8080"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.122.1

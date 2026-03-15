@@ -8,38 +8,31 @@ export
 endif
 
 AWS_REGION ?= us-east-1
-AWS_ENDPOINT_URL ?= http://localhost:4566
-INGEST_HTTP_ADDR ?= :8080
 TF_DIR ?= infra/tf
+TF_MIN_VERSION ?= 1.6.0
+RUNTIME_DIR ?= .runtime
+RUNTIME_ENV_FILE ?= $(RUNTIME_DIR)/ingest.env
+TF_VARS_FILE ?= $(RUNTIME_DIR)/terraform.auto.tfvars
 
 demo:
-	@test -n "$(AWS_ACCESS_KEY_ID)" || (echo "AWS_ACCESS_KEY_ID is required" && exit 1)
-	@test -n "$(AWS_SECRET_ACCESS_KEY)" || (echo "AWS_SECRET_ACCESS_KEY is required" && exit 1)
+	@test -n "$(AWS_ACCESS_KEY_ID)" || (echo "Missing required secrets. Please set:" && echo "  AWS_ACCESS_KEY_ID" && echo "  AWS_SECRET_ACCESS_KEY" && exit 1)
+	@test -n "$(AWS_SECRET_ACCESS_KEY)" || (echo "Missing required secrets. Please set:" && echo "  AWS_ACCESS_KEY_ID" && echo "  AWS_SECRET_ACCESS_KEY" && exit 1)
+	@TF_VERSION="$$(terraform version -json | awk -F'"' '/terraform_version/ {print $$4}')"; \
+	awk -v current="$$TF_VERSION" -v required="$(TF_MIN_VERSION)" 'BEGIN { split(current, c, "."); split(required, r, "."); for (i = 1; i <= 3; i++) { cv = (c[i] == "" ? 0 : c[i]); rv = (r[i] == "" ? 0 : r[i]); if (cv > rv) exit 0; if (cv < rv) exit 1 } exit 0 }' || (echo "Terraform >= $(TF_MIN_VERSION) is required (found $$TF_VERSION)" && exit 1)
+	mkdir -p $(RUNTIME_DIR) $(TF_DIR)/build
+	printf "aws_access_key_id = \"%s\"\naws_secret_access_key = \"%s\"\naws_region = \"%s\"\n" "$(AWS_ACCESS_KEY_ID)" "$(AWS_SECRET_ACCESS_KEY)" "$(AWS_REGION)" > $(TF_VARS_FILE)
+	printf "INGEST_DYNAMODB_TABLE=\nINGEST_SQS_QUEUE_URL=\n" > $(RUNTIME_ENV_FILE)
 	docker compose up -d localstack jaeger prometheus grafana otel-collector
-	mkdir -p $(TF_DIR)/build
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(TF_DIR)/build/bootstrap ./worker/lambda
-	rm -f $(TF_DIR)/build/worker-lambda.zip
-	cd $(TF_DIR)/build && zip -q worker-lambda.zip bootstrap
-	TF_VAR_aws_access_key_id="$(AWS_ACCESS_KEY_ID)" \
-	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
+	docker compose build worker-build ingest
+	docker compose run --rm worker-build
 	terraform -chdir=$(TF_DIR) init
-	TF_VAR_aws_access_key_id="$(AWS_ACCESS_KEY_ID)" \
-	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
-	terraform -chdir=$(TF_DIR) apply -auto-approve
+	terraform -chdir=$(TF_DIR) apply -auto-approve -var-file=$(abspath $(TF_VARS_FILE))
 	@QUEUE_URL="$$(terraform -chdir=$(TF_DIR) output -raw ingest_queue_url)"; \
 	TABLE_NAME="$$(terraform -chdir=$(TF_DIR) output -raw ingest_table_name)"; \
 	API_URL="http://localhost:8080"; \
 	EVENT_ID="demo-evt-1"; \
-	trap 'kill 0' INT TERM EXIT; \
-	AWS_REGION="$(AWS_REGION)" \
-	AWS_ENDPOINT_URL="$(AWS_ENDPOINT_URL)" \
-	AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" \
-	AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
-	OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317" \
-	INGEST_HTTP_ADDR="$(INGEST_HTTP_ADDR)" \
-	INGEST_DYNAMODB_TABLE="$$TABLE_NAME" \
-	INGEST_SQS_QUEUE_URL="$$QUEUE_URL" \
-	go run ./ingest & \
+	printf "INGEST_DYNAMODB_TABLE=%s\nINGEST_SQS_QUEUE_URL=%s\n" "$$TABLE_NAME" "$$QUEUE_URL" > "$(RUNTIME_ENV_FILE)"; \
+	docker compose up -d ingest; \
 	for attempt in {1..30}; do \
 		if curl -fsS "$$API_URL/health" >/dev/null 2>&1; then \
 			break; \
@@ -67,12 +60,8 @@ demo:
 	echo "POST sample:"; \
 	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"1\",\"type\":\"user.created\",\"payload\":{\"name\":\"Ada\"}}'"; \
 	echo "GET sample:"; \
-	echo "curl $$API_URL/events/1"; \
-	echo ""; \
-	wait
+	echo "curl $$API_URL/events/1"
 
 stop-demo:
-	-TF_VAR_aws_access_key_id="$(AWS_ACCESS_KEY_ID)" \
-	TF_VAR_aws_secret_access_key="$(AWS_SECRET_ACCESS_KEY)" \
-	terraform -chdir=$(TF_DIR) destroy -auto-approve
+	-test -f $(TF_VARS_FILE) && terraform -chdir=$(TF_DIR) destroy -auto-approve -var-file=$(abspath $(TF_VARS_FILE))
 	docker compose down

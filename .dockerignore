@@ -1,0 +1,8 @@
+.git
+.gitignore
+.idea
+.runtime
+infra/tf/.terraform
+infra/tf/build
+localstack-data
+README.md

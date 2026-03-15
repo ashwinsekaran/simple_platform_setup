@@ -137,30 +137,51 @@ func (s *IngestServer) HandlePostEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *IngestServer) HandleGetEvent(w http.ResponseWriter, r *http.Request) {
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx, span := otel.Tracer("simple_platform_setup/ingest").Start(ctx, "ingest.get_event")
+	defer span.End()
+
+	instruments := ingestInstruments()
+	instruments.requests.Add(ctx, 1)
+	start := time.Now()
+	defer instruments.durationMS.Record(ctx, float64(time.Since(start).Milliseconds()))
+
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
+		instruments.errors.Add(ctx, 1)
+		span.SetStatus(codes.Error, "missing event id")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "event id is required",
 		})
 		return
 	}
 
-	event, err := s.repo.GetEvent(r.Context(), id)
+	span.SetAttributes(attribute.String("event.id", id))
+
+	event, err := s.repo.GetEvent(ctx, id)
 	if err != nil {
 		if err == repo.ErrEventNotFound {
+			instruments.errors.Add(ctx, 1)
+			span.SetStatus(codes.Error, "event not found")
 			WriteJSON(w, http.StatusNotFound, map[string]string{
 				"error": "event not found",
 			})
 			return
 		}
 
-		log.Printf("get event failed: %v", err)
+		instruments.errors.Add(ctx, 1)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to get event")
+		telemetry.Log(ctx, "get event failed: %v", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to get event",
 		})
 		return
 	}
 
+	instruments.successes.Add(ctx, 1)
+	span.SetAttributes(attribute.String("event.type", event.Type))
+	telemetry.Log(ctx, "fetched event: id=%s status=%s", event.ID, event.ProcessingStatus)
 	WriteJSON(w, http.StatusOK, event)
 }
 

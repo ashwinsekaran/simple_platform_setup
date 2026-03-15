@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
 	"github.com/ashwinsekaran/simple_platform_app/monitoring/telemetry"
+	"github.com/ashwinsekaran/simple_platform_app/worker/config"
 	"github.com/ashwinsekaran/simple_platform_app/worker/processor"
 	"github.com/ashwinsekaran/simple_platform_app/worker/repo"
 )

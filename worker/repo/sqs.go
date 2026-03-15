@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
-	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
+	"github.com/ashwinsekaran/simple_platform_app/worker/config"
+	"github.com/ashwinsekaran/simple_platform_app/worker/ent"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"

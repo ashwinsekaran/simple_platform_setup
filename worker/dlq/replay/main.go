@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ashwinsekaran/simple_platform_app/ingest/config"
+	"github.com/ashwinsekaran/simple_platform_app/worker/config"
 	workerrepo "github.com/ashwinsekaran/simple_platform_app/worker/repo"
 )
 

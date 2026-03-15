@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ashwinsekaran/simple_platform_app/ingest/ent"
+	"github.com/ashwinsekaran/simple_platform_app/worker/ent"
 )
 
 type EventRepository interface {

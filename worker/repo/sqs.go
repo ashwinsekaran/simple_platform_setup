@@ -31,9 +31,10 @@ type SQSRepository struct {
 }
 
 var dlqMetrics struct {
-	once         sync.Once
-	messageCount metric.Int64ObservableGauge
-	replays      metric.Int64Counter
+	once              sync.Once
+	queueMessageCount metric.Int64ObservableGauge
+	dlqMessageCount   metric.Int64ObservableGauge
+	replays           metric.Int64Counter
 }
 
 func NewSQSRepository(ctx context.Context, cfg config.Config) (*SQSRepository, error) {
@@ -103,15 +104,22 @@ func (r *SQSRepository) StartDLQMonitoring(ctx context.Context, interval time.Du
 	meter := otel.Meter("simple_platform_setup/dlq")
 	instruments := dlqInstruments()
 	_, err := meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		count, err := r.DLQMessageCount(ctx)
+		queueCount, err := r.QueueMessageCount(ctx)
+		if err != nil {
+			telemetry.Log(ctx, "queue count fetch failed: %v", err)
+			return nil
+		}
+
+		dlqCount, err := r.DLQMessageCount(ctx)
 		if err != nil {
 			telemetry.Log(ctx, "dlq count fetch failed: %v", err)
 			return nil
 		}
 
-		observer.ObserveInt64(instruments.messageCount, count)
+		observer.ObserveInt64(instruments.queueMessageCount, queueCount)
+		observer.ObserveInt64(instruments.dlqMessageCount, dlqCount)
 		return nil
-	}, instruments.messageCount)
+	}, instruments.queueMessageCount, instruments.dlqMessageCount)
 	if err != nil {
 		return fmt.Errorf("register dlq callback: %w", err)
 	}
@@ -133,12 +141,24 @@ func (r *SQSRepository) DLQMessageCount(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("dlq queue url is not configured")
 	}
 
+	return r.queueMessageCount(ctx, r.dlqURL)
+}
+
+func (r *SQSRepository) QueueMessageCount(ctx context.Context) (int64, error) {
+	if r.queueURL == "" {
+		return 0, fmt.Errorf("queue url is not configured")
+	}
+
+	return r.queueMessageCount(ctx, r.queueURL)
+}
+
+func (r *SQSRepository) queueMessageCount(ctx context.Context, queueURL string) (int64, error) {
 	output, err := r.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
-		QueueUrl:       aws.String(r.dlqURL),
+		QueueUrl:       aws.String(queueURL),
 		AttributeNames: []sqsTypes.QueueAttributeName{sqsTypes.QueueAttributeNameApproximateNumberOfMessages},
 	})
 	if err != nil {
-		return 0, fmt.Errorf("get dlq attributes: %w", err)
+		return 0, fmt.Errorf("get queue attributes: %w", err)
 	}
 
 	value := output.Attributes[string(sqsTypes.QueueAttributeNameApproximateNumberOfMessages)]
@@ -245,13 +265,15 @@ func (r *SQSRepository) sendEvent(ctx context.Context, queueURL string, event en
 }
 
 func dlqInstruments() *struct {
-	once         sync.Once
-	messageCount metric.Int64ObservableGauge
-	replays      metric.Int64Counter
+	once              sync.Once
+	queueMessageCount metric.Int64ObservableGauge
+	dlqMessageCount   metric.Int64ObservableGauge
+	replays           metric.Int64Counter
 } {
 	dlqMetrics.once.Do(func() {
 		meter := otel.Meter("simple_platform_setup/dlq")
-		dlqMetrics.messageCount, _ = meter.Int64ObservableGauge("worker_dlq_message_count")
+		dlqMetrics.queueMessageCount, _ = meter.Int64ObservableGauge("worker_queue_message_count")
+		dlqMetrics.dlqMessageCount, _ = meter.Int64ObservableGauge("worker_dlq_message_count")
 		dlqMetrics.replays, _ = meter.Int64Counter("worker_dlq_replay_total")
 	})
 

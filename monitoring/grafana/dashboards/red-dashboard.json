@@ -393,7 +393,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(ingest_created_total[$__rate_interval]))",
+          "expr": "sum(increase(ingest_created_total[1m]))",
           "legendFormat": "ingest accepted",
           "refId": "A"
         },
@@ -402,7 +402,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(worker_processed_total[$__rate_interval]))",
+          "expr": "sum(increase(worker_processed_total[1m]))",
           "legendFormat": "worker processed",
           "refId": "B"
         },
@@ -411,7 +411,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(worker_error_total[$__rate_interval]))",
+          "expr": "sum(increase(worker_error_total[1m]))",
           "legendFormat": "worker failed",
           "refId": "C"
         }
@@ -466,12 +466,21 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "expr": "last_over_time(worker_queue_message_count[$__rate_interval])",
+          "legendFormat": "main queue queued",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(increase(worker_dlq_replay_total[$__rate_interval]))",
           "legendFormat": "dlq replayed",
-          "refId": "B"
+          "refId": "C"
         }
       ],
-      "title": "DLQ Overview",
+      "title": "Queue Overview",
       "type": "timeseries"
     },
     {
@@ -512,7 +521,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(worker_processed_total[$__rate_interval]))",
+          "expr": "sum(increase(worker_processed_total[1m]))",
           "legendFormat": "processed",
           "refId": "A"
         }
@@ -558,7 +567,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(worker_error_total[$__rate_interval]))",
+          "expr": "sum(increase(worker_error_total[1m]))",
           "legendFormat": "errors",
           "refId": "A"
         }
@@ -605,7 +614,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 * sum(increase(worker_error_total[$__rate_interval])) / clamp_min(sum(increase(worker_processed_total[$__rate_interval])) + sum(increase(worker_error_total[$__rate_interval])), 1)",
+          "expr": "100 * sum(increase(worker_error_total[1m])) / clamp_min(sum(increase(worker_processed_total[1m])) + sum(increase(worker_error_total[1m])), 1)",
           "legendFormat": "error %",
           "refId": "A"
         }

@@ -23,14 +23,14 @@ demo:
 	printf "aws_access_key_id = \"%s\"\naws_secret_access_key = \"%s\"\naws_region = \"%s\"\n" "$(AWS_ACCESS_KEY_ID)" "$(AWS_SECRET_ACCESS_KEY)" "$(AWS_REGION)" > $(TF_VARS_FILE)
 	printf "INGEST_DYNAMODB_TABLE=\nINGEST_SQS_QUEUE_URL=\nINGEST_DLQ_QUEUE_URL=\n" > $(RUNTIME_ENV_FILE)
 	docker compose up -d localstack jaeger prometheus grafana otel-collector
-	docker compose build worker-build ingest dlq-monitor
+	docker compose build worker-build ingest dlq-monitor dlq-inspect dlq-replay
 	docker compose run --rm worker-build
 	terraform -chdir=$(TF_DIR) init
 	terraform -chdir=$(TF_DIR) apply -auto-approve -var-file=$(abspath $(TF_VARS_FILE))
 	@QUEUE_URL="$$(terraform -chdir=$(TF_DIR) output -raw ingest_queue_url)"; \
 	TABLE_NAME="$$(terraform -chdir=$(TF_DIR) output -raw ingest_table_name)"; \
 	API_URL="http://localhost:8080"; \
-	EVENT_ID="demo-evt-1"; \
+	EVENT_ID="1"; \
 	DLQ_URL="$$(terraform -chdir=$(TF_DIR) output -raw ingest_dlq_queue_url)"; \
 	printf "INGEST_DYNAMODB_TABLE=%s\nINGEST_SQS_QUEUE_URL=%s\nINGEST_DLQ_QUEUE_URL=%s\n" "$$TABLE_NAME" "$$QUEUE_URL" "$$DLQ_URL" > "$(RUNTIME_ENV_FILE)"; \
 	docker compose up -d ingest dlq-monitor; \
@@ -59,9 +59,17 @@ demo:
 	echo "Grafana: http://localhost:3000 (admin/admin)"; \
 	echo "Sample event id: $$EVENT_ID"; \
 	echo "POST sample:"; \
-	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"1\",\"type\":\"user.created\",\"payload\":{\"name\":\"Ada\"}}'"; \
+	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"2\",\"type\":\"user.created\",\"payload\":{\"name\":\"Ada\"}}'"; \
+	echo "Failing sample (worker validation -> retries -> DLQ):"; \
+	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"3\",\"type\":\"user.created\",\"payload\":{\"email\":\"ada@example.com\"}}'"; \
 	echo "GET sample:"; \
-	echo "curl $$API_URL/events/1"
+	echo "curl $$API_URL/events/2"; \
+	echo "Inspect DLQ:"; \
+	echo "docker compose run --rm dlq-inspect"; \
+	echo "Replay failed event unchanged:"; \
+	echo "docker compose run --rm -e EVENT_ID=3 dlq-replay"; \
+	echo "Replay failed event with corrected payload:"; \
+	echo "docker compose run --rm -e EVENT_ID=3 -e FIXED_PAYLOAD='{\"name\":\"Ada\"}' dlq-replay"
 
 stop-demo:
 	-test -f $(TF_VARS_FILE) && terraform -chdir=$(TF_DIR) destroy -auto-approve -var-file=$(abspath $(TF_VARS_FILE))

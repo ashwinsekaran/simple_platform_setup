@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"time"
@@ -16,6 +17,8 @@ func main() {
 	if eventID == "" {
 		log.Fatal("EVENT_ID is required")
 	}
+	fixedPayload := os.Getenv("FIXED_PAYLOAD")
+	fixedType := os.Getenv("FIXED_TYPE")
 
 	cfg := config.Load()
 
@@ -47,6 +50,24 @@ func main() {
 	for _, event := range events {
 		if event.Event.ID != eventID {
 			continue
+		}
+
+		if fixedType != "" {
+			event.Event.Type = fixedType
+		}
+
+		if fixedPayload != "" {
+			if !json.Valid([]byte(fixedPayload)) {
+				log.Fatal("FIXED_PAYLOAD must be valid JSON")
+			}
+
+			event.Event.Payload = json.RawMessage(fixedPayload)
+		}
+
+		if fixedPayload != "" || fixedType != "" {
+			if err := eventRepo.PrepareReplayEvent(ctx, event.Event); err != nil {
+				log.Fatal(err)
+			}
 		}
 
 		if err := eventRepo.ReplayDLQEvent(ctx, event); err != nil {

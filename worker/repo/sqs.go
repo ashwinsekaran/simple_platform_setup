@@ -75,6 +75,25 @@ func (r *SQSRepository) ReceiveDLQEvents(ctx context.Context, maxMessages int32)
 	return r.receiveFromQueue(ctx, r.dlqURL, maxMessages)
 }
 
+func (r *SQSRepository) ReleaseDLQEvents(ctx context.Context, events []ReceivedEvent) error {
+	if r.dlqURL == "" {
+		return fmt.Errorf("dlq queue url is not configured")
+	}
+
+	for _, event := range events {
+		_, err := r.sqsClient.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+			QueueUrl:          aws.String(r.dlqURL),
+			ReceiptHandle:     aws.String(event.ReceiptHandle),
+			VisibilityTimeout: 0,
+		})
+		if err != nil {
+			return fmt.Errorf("release dlq message visibility: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (r *SQSRepository) ReplayDLQEvent(ctx context.Context, event ReceivedEvent) error {
 	if r.dlqURL == "" {
 		return fmt.Errorf("dlq queue url is not configured")
@@ -93,6 +112,35 @@ func (r *SQSRepository) ReplayDLQEvent(ctx context.Context, event ReceivedEvent)
 	}
 
 	dlqInstruments().replays.Add(ctx, 1)
+	return nil
+}
+
+func (r *SQSRepository) PrepareReplayEvent(ctx context.Context, event ent.Event) error {
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal replay payload: %w", err)
+	}
+
+	_, err = r.ddbClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(r.tableName),
+		Key: map[string]dynamoTypes.AttributeValue{
+			"id": &dynamoTypes.AttributeValueMemberS{Value: event.ID},
+		},
+		UpdateExpression: aws.String("SET #type = :type, payload = :payload, processing_status = :status, processing_result = :result"),
+		ExpressionAttributeNames: map[string]string{
+			"#type": "type",
+		},
+		ExpressionAttributeValues: map[string]dynamoTypes.AttributeValue{
+			":type":    &dynamoTypes.AttributeValueMemberS{Value: event.Type},
+			":payload": &dynamoTypes.AttributeValueMemberS{Value: string(payload)},
+			":status":  &dynamoTypes.AttributeValueMemberS{Value: "queued"},
+			":result":  &dynamoTypes.AttributeValueMemberS{Value: ""},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("prepare replay event: %w", err)
+	}
+
 	return nil
 }
 
@@ -197,7 +245,7 @@ func (r *SQSRepository) receiveFromQueue(ctx context.Context, queueURL string, m
 	output, err := r.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:              aws.String(queueURL),
 		MaxNumberOfMessages:   maxMessages,
-		WaitTimeSeconds:       20,
+		WaitTimeSeconds:       5,
 		VisibilityTimeout:     30,
 		MessageAttributeNames: []string{"All"},
 	})

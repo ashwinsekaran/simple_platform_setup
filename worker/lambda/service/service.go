@@ -73,6 +73,15 @@ func (s *Service) processRecord(ctx context.Context, record events.SQSMessage) e
 		attribute.String("event.type", event.Type),
 	)
 
+	if err := processEvent(event.Type, event.Payload); err != nil {
+		_ = s.repo.UpdateProcessingResult(ctx, event.ID, "failed", err.Error())
+		instruments.errors.Add(ctx, 1)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "process event")
+		telemetry.Log(ctx, "lambda process failed: id=%s type=%s error=%v", event.ID, event.Type, err)
+		return fmt.Errorf("process event: %w", err)
+	}
+
 	if err := s.repo.UpdateProcessingResult(ctx, event.ID, "processed", "lambda processed event successfully"); err != nil {
 		instruments.errors.Add(ctx, 1)
 		span.RecordError(err)

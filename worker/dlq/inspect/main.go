@@ -30,6 +30,11 @@ func main() {
 		log.Print("no messages found in dlq")
 		return
 	}
+	defer func() {
+		if err := eventRepo.ReleaseDLQEvents(context.Background(), events); err != nil {
+			log.Printf("release dlq message visibility: %v", err)
+		}
+	}()
 
 	output, err := json.MarshalIndent(events, "", "  ")
 	if err != nil {

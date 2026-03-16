@@ -200,21 +200,29 @@ DLQ helpers:
 Inspect:
 
 ```bash
-INGEST_DLQ_QUEUE_URL=$(terraform -chdir=infra/tf output -raw ingest_dlq_queue_url) \
-go run ./worker/dlq/inspect
+docker compose run --rm dlq-inspect
 ```
 
 Replay:
 
 ```bash
 EVENT_ID=evt-1 \
-INGEST_DLQ_QUEUE_URL=$(terraform -chdir=infra/tf output -raw ingest_dlq_queue_url) \
-go run ./worker/dlq/replay
+docker compose run --rm -e EVENT_ID=evt-1 dlq-replay
+```
+
+Replay with corrected payload:
+
+```bash
+docker compose run --rm \
+  -e EVENT_ID=evt-fail-1 \
+  -e FIXED_PAYLOAD='{"name":"Ada"}' \
+  dlq-replay
 ```
 
 Important note:
-- DLQ infrastructure is in place
-- a realistic business-failure scenario for deliberately driving events into the DLQ is still a follow-up improvement
+- a real failure path is implemented for `user.created`
+- the worker requires `payload.name` for `user.created`
+- if ingest accepts a `user.created` event without `payload.name`, Lambda marks it failed, retries it, and SQS eventually moves it to the DLQ
 
 ## Trace Propagation Plan
 
@@ -256,6 +264,36 @@ Metrics emitted:
 - main queue depth
 - DLQ depth
 - DLQ replay count
+
+### Failing Event Demo
+
+Real failure rule:
+- `user.created` must contain `payload.name`
+
+Healthy example:
+
+```bash
+curl -X POST http://localhost:8080/events \
+  -H "Content-Type: application/json" \
+  -d '{"id":"evt-ok-1","type":"user.created","payload":{"name":"Ada"}}'
+```
+
+Failing example:
+
+```bash
+curl -X POST http://localhost:8080/events \
+  -H "Content-Type: application/json" \
+  -d '{"id":"evt-fail-1","type":"user.created","payload":{"email":"ada@example.com"}}'
+```
+
+What happens:
+- ingest accepts and stores the event because the payload is valid JSON
+- Lambda rejects it because `payload.name` is missing
+- worker error metrics increase
+- `Pipeline Comparison` shows worker failures
+- `Queue Overview` shows the message eventually move into the DLQ
+- `GET /events/evt-fail-1` shows processing status `failed`
+- after it reaches the DLQ, you can replay it unchanged or replay it with a corrected payload using `FIXED_PAYLOAD`
 
 ### Logs
 

@@ -163,7 +163,7 @@ Key panels:
 
 ## DLQ Operations
 
-Inspect failed events:
+Inspect failed events (After 30-60 secs of failure):
 
 ```bash
 docker compose run --rm dlq-inspect
@@ -175,7 +175,7 @@ Replay unchanged:
 docker compose run --rm -e EVENT_ID=3 dlq-replay
 ```
 
-Replay with corrected payload:
+Replay with corrected payload (After 30-60 secs of failure):
 
 ```bash
 docker compose run --rm \

@@ -64,11 +64,11 @@ demo:
 	echo "curl -X POST $$API_URL/events -H 'Content-Type: application/json' -d '{\"id\":\"3\",\"type\":\"user.created\",\"payload\":{\"email\":\"ada@example.com\"}}'"; \
 	echo "GET sample:"; \
 	echo "curl $$API_URL/events/2"; \
-	echo "Inspect DLQ:"; \
+	echo "Inspect DLQ (After 30-60 secs of failure):"; \
 	echo "docker compose run --rm dlq-inspect"; \
-	echo "Replay failed event unchanged:"; \
+	echo "Replay failed event unchanged (After 30-60 secs of failure):"; \
 	echo "docker compose run --rm -e EVENT_ID=3 dlq-replay"; \
-	echo "Replay failed event with corrected payload:"; \
+	echo "Replay failed event with corrected payload (After 30-60 secs of failure):"; \
 	echo "docker compose run --rm -e EVENT_ID=3 -e FIXED_PAYLOAD='{\"name\":\"Ada\"}' dlq-replay"
 
 stop-demo:

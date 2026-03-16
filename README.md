@@ -2,71 +2,37 @@
 
 Small event-driven system for local development on LocalStack.
 
-It provides:
-- an HTTP ingest API
-- durable event state in DynamoDB
-- asynchronous processing through SQS + Lambda
-- DLQ tooling for failed messages
-- end-to-end observability with OpenTelemetry, Jaeger, Prometheus, and Grafana
+## Overview
 
-## Services
-
-Runtime services involved:
+Architecture:
 - `ingest`
-  Go HTTP API for write/read endpoints
-- `SQS`
-  Main async queue for events
-- `Lambda`
-  Downstream async processor
+  Go HTTP API with `POST /events` and `GET /events/{id}`
 - `DynamoDB`
   Durable event state and processing result store
+- `SQS`
+  Main async queue between ingest and worker
+- `Lambda`
+  Downstream async processor
 - `DLQ`
   Isolation queue for repeatedly failing messages
-- `OTel Collector`
-  Receives OTLP telemetry from app components
-- `Jaeger`
-  Trace UI
-- `Prometheus`
-  Metrics store/query engine
-- `Grafana`
-  RED dashboard UI
+- `OTel Collector`, `Jaeger`, `Prometheus`, `Grafana`
+  Local observability stack
 - `LocalStack`
   Local AWS emulation
 
-## Structure
-
 Main folders:
 - [ingest](/Users/ashwinsekaran/Work/github/simple_platform_setup/ingest)
-  HTTP API, validation, idempotent write path, read path
 - [worker](/Users/ashwinsekaran/Work/github/simple_platform_setup/worker)
-  Lambda handler, DLQ inspect/replay/monitor helpers, worker-side repo code
 - [infra/tf](/Users/ashwinsekaran/Work/github/simple_platform_setup/infra/tf)
-  Terraform for SQS, DLQ, DynamoDB, Lambda, IAM, event source mapping
 - [monitoring](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring)
-  OTel Collector, Prometheus, Grafana, dashboard provisioning
 
-## How It Works
-
-Write flow:
-1. Client calls `POST /events`
-2. Ingest validates `id`, `type`, `payload`
-3. Ingest stores the event in DynamoDB with processing status `queued`
-4. Ingest publishes the event to SQS
-5. Lambda consumes from SQS asynchronously
-6. Lambda updates DynamoDB with processing result
-
-Read flow:
-1. Client calls `GET /events/{id}`
-2. Ingest reads the durable event record from DynamoDB
-3. Response includes event data plus processing status/result
-
-## Run Locally
+## Run
 
 Prerequisites:
 - Docker / Docker Compose
 - Terraform `>= 1.6.0`
 
-Optional local credentials in `.env` or shell:
+Set local credentials in `.env` or shell:
 
 ```bash
 AWS_ACCESS_KEY_ID=test
@@ -79,27 +45,22 @@ Start the full demo:
 make demo
 ```
 
-No host Go installation is required. The ingest app and Lambda artifact are both built with Docker.
-
-This will:
-- start LocalStack and the observability stack
-- build the ingest container and Lambda artifact with Docker
-- apply Terraform against LocalStack
-- start the ingest API container
-- generate sample traffic end-to-end
-- print local URLs and sample curl commands
-
 Stop and destroy:
 
 ```bash
 make stop-demo
 ```
 
-Useful local URLs after `make demo`:
-- API: `http://localhost:8080`
-- Jaeger: `http://localhost:16686`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
+`make demo`:
+- starts LocalStack and the observability stack
+- builds the ingest container and Lambda artifact with Docker
+- applies Terraform against LocalStack
+- starts ingest and DLQ monitor
+- generates sample traffic
+- prints API, Jaeger, Prometheus, and Grafana URLs
+- prints sample `curl`, DLQ inspect, and DLQ replay commands
+
+No host Go installation is required.
 
 ## API
 
@@ -124,275 +85,132 @@ curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
 
-## Requirements Coverage
+## Design Notes
 
-### Ingestion API
+Assumptions:
+- local development only; no real AWS deployment required
+- event ids are caller-supplied and identify immutable event submissions
+- same `id` with different content is treated as conflict, not update
 
-Implemented in [ingest/handlers/ingest.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/ingest/handlers/ingest.go).
+Requirements coverage:
+- write API: `POST /events`
+- read API: `GET /events/{id}`
+- async processing: `ingest -> SQS -> Lambda`
+- durable state: DynamoDB
+- DLQ inspect/replay: yes
+- LocalStack + Terraform: yes
 
-Accepted fields:
-- `id`
-- `type`
-- `payload`
-
-Validation rules:
-- missing required fields -> `400`
-- invalid JSON body -> `400`
-- invalid payload JSON -> `400`
-
-### Query API
-
-Implemented in [ingest/handlers/ingest.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/ingest/handlers/ingest.go).
-
-`GET /events/{id}` returns:
-- original event data
-- processing status
-- processing result
-
-### Asynchronous Processing
-
-Implemented with:
-- SQS in [infra/tf/main.tf](/Users/ashwinsekaran/Work/github/simple_platform_setup/infra/tf/main.tf)
-- Lambda in [infra/tf/main.tf](/Users/ashwinsekaran/Work/github/simple_platform_setup/infra/tf/main.tf)
-- Lambda handler in [worker/lambda/main.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/worker/lambda/main.go)
-
-### Fault Tolerance
-
-Implemented with:
-- SQS DLQ in [infra/tf/main.tf](/Users/ashwinsekaran/Work/github/simple_platform_setup/infra/tf/main.tf)
-- redrive policy from main queue to DLQ
-- inspect helper in [worker/dlq/inspect/main.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/worker/dlq/inspect/main.go)
-- replay helper in [worker/dlq/replay/main.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/worker/dlq/replay/main.go)
-
-## Assumptions
-
-- Local development only; deployment to real AWS is not required here
-- Event ids are caller-supplied and expected to uniquely identify one immutable event
-- Same `id` with changed content is treated as conflict, not update
-- Observability infrastructure is local Docker infrastructure, while AWS-like resources are provisioned through Terraform into LocalStack
-- Lambda is the async compute boundary used for the challenge
-
-## Idempotency Model
-
-Idempotency behavior:
-- first submission with a new `id` -> store + publish
-- repeated submission with same `id` and same content -> return success without creating a new logical event
-- repeated submission with same `id` but different content -> `409 Conflict`
-
-Why:
-- event ids identify immutable event submissions
-- allowing changed payloads under the same id would blur retry vs update semantics
+Idempotency model:
+- first submission with a new `id` stores and publishes
+- same `id` + same content returns success without creating a duplicate
+- same `id` + different content returns `409 Conflict`
 
 Important note:
-- the implementation is correct for standard sequential retries
+- this is correct for normal sequential retries
 - it is not fully hardened for highly concurrent same-id racing requests
 
-## Fault-Tolerance Approach
+Fault tolerance:
+- healthy events continue through SQS + Lambda
+- repeatedly failing events are isolated by SQS redrive into the DLQ
+- failed items can be inspected and replayed later
+- replay can be done unchanged or with corrected payload/type
 
-Approach:
-- healthy messages are processed asynchronously through SQS + Lambda
-- repeatedly failing messages are isolated by SQS redrive into a DLQ
-- failed messages can be inspected later
-- failed messages can be replayed back to the main queue later
+Real failing-event rule:
+- `user.created` requires `payload.name`
+- a valid JSON event without `payload.name` is accepted by ingest, then fails in Lambda, is retried, and eventually moves to the DLQ
 
-DLQ helpers:
+Trace propagation:
+- ingest extracts HTTP trace context from headers
+- ingest injects OTel context into SQS message attributes
+- Lambda extracts that context and continues the trace
+- Jaeger shows a single trace spanning `ingest.post_event` and `worker.process_event`
 
-Inspect:
+Security and cost notes:
+- secrets are env-driven, not hardcoded in app or Terraform
+- Lambda IAM policy is scoped to the specific table and queue it uses
+- DynamoDB uses `PAY_PER_REQUEST`
+- SQS + Lambda keep the async path simple and cost-friendly
+- LocalStack avoids real cloud spend for local development
+
+## Observability
+
+Traces:
+- Jaeger: [http://localhost:16686](http://localhost:16686)
+
+Metrics:
+- Prometheus: [http://localhost:9090](http://localhost:9090)
+- Grafana: [http://localhost:3000](http://localhost:3000)
+
+Dashboard:
+- [monitoring/grafana/dashboards/red-dashboard.json](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring/grafana/dashboards/red-dashboard.json)
+
+Key panels:
+- `Ingest Rate`
+- `Ingest Errors`
+- `Ingest Duration P95`
+- `Ingest Replays`
+- `Ingest Conflicts`
+- `Ingest Validation Failures`
+- `Ingest Dependency Duration P95`
+- `Pipeline Comparison`
+  Compare ingest accepted, worker processed, and worker failed in one graph
+- `Queue Overview`
+  Main queue depth, DLQ depth, and DLQ replay count
+- `Worker Processed Count`
+- `Worker Error Count`
+- `Worker Error Percentage`
+- `Worker End-to-End Latency`
+
+## DLQ Operations
+
+Inspect failed events:
 
 ```bash
 docker compose run --rm dlq-inspect
 ```
 
-Replay:
+Replay unchanged:
 
 ```bash
-EVENT_ID=evt-1 \
-docker compose run --rm -e EVENT_ID=evt-1 dlq-replay
+docker compose run --rm -e EVENT_ID=3 dlq-replay
 ```
 
 Replay with corrected payload:
 
 ```bash
 docker compose run --rm \
-  -e EVENT_ID=evt-fail-1 \
+  -e EVENT_ID=3 \
   -e FIXED_PAYLOAD='{"name":"Ada"}' \
   dlq-replay
 ```
 
-Important note:
-- a real failure path is implemented for `user.created`
-- the worker requires `payload.name` for `user.created`
-- if ingest accepts a `user.created` event without `payload.name`, Lambda marks it failed, retries it, and SQS eventually moves it to the DLQ
+Note:
+- DLQ movement is not immediate
+- a failing message may take around a minute or more to appear in the DLQ because of queue visibility timeout and retry/redrive timing
 
-## Trace Propagation Plan
+## Validation Flow
 
-HTTP boundary:
-- ingest extracts incoming `traceparent` headers
+Duplicate submission:
+- post the same `id` and same content twice
+- second request should be idempotent, not a new event
 
-Async boundary:
-- ingest injects OTel trace context into SQS message attributes
-- Lambda extracts context from SQS message attributes
+Conflict:
+- post the same `id` with different content
+- should return `409 Conflict`
 
-Result:
-- Jaeger can show one logical trace that spans:
-  - `ingest.post_event`
-  - `worker.process_event`
-
-## Observability
-
-### Traces
-
-- OTel SDK in app code
-- OTel Collector receives OTLP
-- Jaeger stores and visualizes traces
-
-### Metrics
-
-Metrics emitted:
-- ingest request rate
-- ingest error count
-- ingest request duration
-- ingest idempotent replay count
-- ingest conflict count
-- ingest validation failure count
-- ingest dependency latency/error metrics for DynamoDB and SQS
-- ingest accepted event count
-- worker processed count
-- worker error count
-- worker error percentage
-- worker end-to-end latency
-- main queue depth
-- DLQ depth
-- DLQ replay count
-
-### Failing Event Demo
-
-Real failure rule:
-- `user.created` must contain `payload.name`
-
-Healthy example:
+Deliberately failing event:
 
 ```bash
 curl -X POST http://localhost:8080/events \
   -H "Content-Type: application/json" \
-  -d '{"id":"evt-ok-1","type":"user.created","payload":{"name":"Ada"}}'
+  -d '{"id":"3","type":"user.created","payload":{"email":"ada@example.com"}}'
 ```
 
-Failing example:
+Then verify:
+- `GET /events/3` shows `failed`
+- Grafana shows worker failure activity and queue movement
+- `docker compose run --rm dlq-inspect` shows the failed message once it reaches the DLQ
 
-```bash
-curl -X POST http://localhost:8080/events \
-  -H "Content-Type: application/json" \
-  -d '{"id":"evt-fail-1","type":"user.created","payload":{"email":"ada@example.com"}}'
-```
-
-What happens:
-- ingest accepts and stores the event because the payload is valid JSON
-- Lambda rejects it because `payload.name` is missing
-- worker error metrics increase
-- `Pipeline Comparison` shows worker failures
-- `Queue Overview` shows the message eventually move into the DLQ
-- `GET /events/evt-fail-1` shows processing status `failed`
-- after it reaches the DLQ, you can replay it unchanged or replay it with a corrected payload using `FIXED_PAYLOAD`
-
-### Logs
-
-- logs are trace-correlated through [monitoring/telemetry/log.go](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring/telemetry/log.go)
-- Lambda runtime logs are visible through LocalStack logs
-
-### Dashboard
-
-RED dashboard:
-- [monitoring/grafana/dashboards/red-dashboard.json](/Users/ashwinsekaran/Work/github/simple_platform_setup/monitoring/grafana/dashboards/red-dashboard.json)
-
-Current Grafana panels:
-- `Ingest Rate`
-  Requests per second for the ingest API
-- `Ingest Errors`
-  Recent ingest error count
-- `Ingest Duration P95`
-  P95 ingest request latency
-- `Ingest Replays`
-  Recent idempotent replay count
-- `Ingest Conflicts`
-  Recent same-id/different-content conflict count
-- `Ingest Validation Failures`
-  Recent validation failures grouped by reason
-- `Ingest Dependency Duration P95`
-  P95 DynamoDB and SQS operation latency from the ingest path
-- `Pipeline Comparison`
-  Single graph comparing ingest accepted events, worker processed events, and worker failures
-- `Queue Overview`
-  Main queue backlog, DLQ backlog, and recent DLQ replay count
-- `Worker Processed Count`
-  Recent processed event count
-- `Worker Error Count`
-  Recent worker error count
-- `Worker Error Percentage`
-  Worker error percentage over the recent window
-- `Worker End-to-End Latency`
-  Worker end-to-end latency as p50, p95, and p99
-
-Dashboard interpretation:
-- count panels answer "how many happened recently?"
-- queue panels answer "how much backlog exists right now?"
-- latency panels answer "how long is the path taking?"
-- the `Pipeline Comparison` panel is the quickest way to compare ingest and worker behavior in one view
-
-Data path:
-- app -> OTel Collector -> Prometheus -> Grafana
-
-Trace path:
-- app -> OTel Collector -> Jaeger
-
-## Key Metrics / Alerts
-
-Key metrics to watch:
-- `ingest_requests_total`
-- `ingest_error_total`
-- `ingest_request_duration_ms`
-- `worker_processed_total`
-- `worker_error_total`
-- `worker_end_to_end_latency_ms`
-
-Reasonable alert ideas:
-- sustained non-zero ingest error rate
-- worker error rate spike
-- end-to-end latency increase
-- DLQ depth above zero
-- ingest request rate drops unexpectedly
-
-## Security Notes
-
-Secrets handling:
-- local credentials are supplied via environment variables / `.env`
-- secrets are not hardcoded into Terraform resources
-
-Least privilege:
-- Lambda IAM policy is scoped to the specific SQS queue and DynamoDB table
-- only currently needed actions are granted
-
-Production-oriented improvements:
-- move secrets to Secrets Manager or SSM
-- tighten IAM further if additional access patterns become known
-- add authn/authz in front of the ingest API
-
-## Cost Notes
-
-Cost-aware choices:
-- SQS and Lambda are pay-per-use
-- DynamoDB uses `PAY_PER_REQUEST`
-- LocalStack avoids real cloud spend during development
-
-Cost levers to tune later:
-- Lambda memory and timeout
-- SQS batch size
-- DynamoDB capacity mode
-- trace sampling rate
-- log verbosity and retention
-
-## Current Gaps / Follow-Ups
-
-- realistic poison-message processing scenario is not yet modeled in Lambda business logic
-- idempotency is not fully race-safe for concurrent duplicate submissions
-- logs are correlated but not stored in Grafana because Loki is not part of the stack
+Trace validation:
+- send a request with `traceparent` header
+- inspect Jaeger to confirm one trace spans ingest and Lambda
